@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -14,6 +14,9 @@ from .config import set_bedrock_api_key
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
+
+# Track active streaming tasks so they can be cancelled from the UI.
+ACTIVE_STREAMS: Dict[str, Dict[str, Any]] = {}
 
 # Enable CORS for local development
 app.add_middleware(
@@ -143,7 +146,7 @@ async def update_bedrock_token(request: UpdateBedrockTokenRequest):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(conversation_id: str, request: SendMessageRequest, http_request: Request):
     """
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
@@ -156,8 +159,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    async def event_generator():
+    async def stream_worker(event_queue: "asyncio.Queue[Dict[str, Any]]", cancel_event: asyncio.Event):
         try:
+            if cancel_event.is_set():
+                await event_queue.put({"type": "cancelled"})
+                return
+
             # Add user message
             storage.add_user_message(conversation_id, request.content)
 
@@ -167,26 +174,45 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+            await event_queue.put({"type": "stage1_start"})
             stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            await event_queue.put({"type": "stage1_complete", "data": stage1_results})
+
+            if cancel_event.is_set():
+                await event_queue.put({"type": "cancelled"})
+                return
 
             # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+            await event_queue.put({"type": "stage2_start"})
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            await event_queue.put({
+                "type": "stage2_complete",
+                "data": stage2_results,
+                "metadata": {
+                    "label_to_model": label_to_model,
+                    "aggregate_rankings": aggregate_rankings,
+                },
+            })
+
+            if cancel_event.is_set():
+                await event_queue.put({"type": "cancelled"})
+                return
 
             # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+            await event_queue.put({"type": "stage3_start"})
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+            await event_queue.put({"type": "stage3_complete", "data": stage3_result})
+
+            if cancel_event.is_set():
+                await event_queue.put({"type": "cancelled"})
+                return
 
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
                 storage.update_conversation_title(conversation_id, title)
-                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+                await event_queue.put({"type": "title_complete", "data": {"title": title}})
 
             # Save complete assistant message
             storage.add_assistant_message(
@@ -197,11 +223,50 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             )
 
             # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-
+            await event_queue.put({"type": "complete"})
+        except asyncio.CancelledError:
+            await asyncio.shield(event_queue.put({"type": "cancelled"}))
+            raise
         except Exception as e:
-            # Send error event
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            await event_queue.put({"type": "error", "message": str(e)})
+        finally:
+            current = ACTIVE_STREAMS.get(conversation_id)
+            if current and current.get("task") is asyncio.current_task():
+                ACTIVE_STREAMS.pop(conversation_id, None)
+
+    async def cancel_active_stream():
+        current = ACTIVE_STREAMS.pop(conversation_id, None)
+        if current:
+            current["cancel_event"].set()
+            current["task"].cancel()
+
+    async def cleanup_active_stream():
+        current = ACTIVE_STREAMS.pop(conversation_id, None)
+        if current and not current["task"].done() and current["cancel_event"].is_set():
+            current["task"].cancel()
+
+    # Cancel any existing stream for this conversation
+    await cancel_active_stream()
+
+    event_queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
+    cancel_event = asyncio.Event()
+    task = asyncio.create_task(stream_worker(event_queue, cancel_event))
+    ACTIVE_STREAMS[conversation_id] = {"task": task, "cancel_event": cancel_event}
+
+    async def event_generator():
+        try:
+            while True:
+                if await http_request.is_disconnected():
+                    await cancel_active_stream()
+                    break
+
+                event = await event_queue.get()
+                yield f"data: {json.dumps(event)}\n\n"
+
+                if event.get("type") in {"complete", "error", "cancelled"}:
+                    break
+        finally:
+            await cleanup_active_stream()
 
     return StreamingResponse(
         event_generator(),
@@ -211,6 +276,19 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             "Connection": "keep-alive",
         }
     )
+
+
+@app.post("/api/conversations/{conversation_id}/message/cancel")
+async def cancel_message_stream(conversation_id: str):
+    """
+    Cancel an active streaming request for a conversation.
+    """
+    current = ACTIVE_STREAMS.pop(conversation_id, None)
+    if current:
+        current["cancel_event"].set()
+        current["task"].cancel()
+        return {"status": "ok", "cancelled": True}
+    return {"status": "ok", "cancelled": False}
 
 
 if __name__ == "__main__":

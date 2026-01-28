@@ -9,6 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [streamController, setStreamController] = useState(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -61,6 +62,8 @@ function App() {
     if (!currentConversationId) return;
 
     setIsLoading(true);
+    const controller = new AbortController();
+    setStreamController(controller);
     try {
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
@@ -90,7 +93,10 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(
+        currentConversationId,
+        content,
+        (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -159,25 +165,70 @@ function App() {
             // Stream complete, reload conversations list
             loadConversations();
             setIsLoading(false);
+            setStreamController(null);
             break;
 
           case 'error':
             console.error('Stream error:', event.message);
             setIsLoading(false);
+            setStreamController(null);
+            break;
+          case 'cancelled':
+            setCurrentConversation((prev) => {
+              if (!prev?.messages?.length) return prev;
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg?.loading) {
+                lastMsg.loading.stage1 = false;
+                lastMsg.loading.stage2 = false;
+                lastMsg.loading.stage3 = false;
+              }
+              return { ...prev, messages };
+            });
+            setIsLoading(false);
+            setStreamController(null);
             break;
 
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+        },
+        { signal: controller.signal }
+      );
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: prev.messages.slice(0, -2),
-      }));
+      if (error.name === 'AbortError') {
+        setCurrentConversation((prev) => {
+          if (!prev?.messages?.length) return prev;
+          const messages = [...prev.messages];
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg?.loading) {
+            lastMsg.loading.stage1 = false;
+            lastMsg.loading.stage2 = false;
+            lastMsg.loading.stage3 = false;
+          }
+          return { ...prev, messages };
+        });
+      } else {
+        console.error('Failed to send message:', error);
+        // Remove optimistic messages on error
+        setCurrentConversation((prev) => ({
+          ...prev,
+          messages: prev.messages.slice(0, -2),
+        }));
+      }
       setIsLoading(false);
+      setStreamController(null);
+    }
+  };
+
+  const handleStop = () => {
+    if (streamController) {
+      streamController.abort();
+    }
+    if (currentConversationId) {
+      api.cancelMessageStream(currentConversationId).catch((error) => {
+        console.error('Failed to cancel stream:', error);
+      });
     }
   };
 
@@ -192,6 +243,7 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
+        onStop={handleStop}
         isLoading={isLoading}
       />
     </div>

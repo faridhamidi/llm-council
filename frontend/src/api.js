@@ -73,7 +73,8 @@ export const api = {
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent) {
+  async sendMessageStream(conversationId, content, onEvent, options = {}) {
+    const { signal } = options;
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
@@ -81,6 +82,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal,
         body: JSON.stringify({ content }),
       }
     );
@@ -127,6 +129,23 @@ export const api = {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to update Bedrock token');
+    }
+    return response.json();
+  },
+
+  /**
+   * Cancel an active streaming message for a conversation.
+   */
+  async cancelMessageStream(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/message/cancel`,
+      {
+        method: 'POST',
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to cancel stream');
     }
     return response.json();
   },

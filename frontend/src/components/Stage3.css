@@ -10,12 +10,35 @@
   border: 1px solid #c8e6c8;
 }
 
+.stage3-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .chairman-label {
   color: #2d8a2d;
   font-size: 12px;
   font-family: monospace;
-  margin-bottom: 12px;
   font-weight: 600;
+}
+
+.copy-stage3-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #c8e6c8;
+  background: #f6fff6;
+  color: #256b25;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.copy-stage3-btn:hover {
+  background: #e6f7e6;
+  border-color: #9dd39d;
 }
 
 .final-text {
