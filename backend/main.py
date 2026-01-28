@@ -10,6 +10,7 @@ import json
 import asyncio
 
 from . import storage
+from .config import set_bedrock_api_key
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
@@ -32,6 +33,11 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+
+
+class UpdateBedrockTokenRequest(BaseModel):
+    """Request to update the Bedrock API token at runtime."""
+    token: str
 
 
 class ConversationMetadata(BaseModel):
@@ -121,6 +127,19 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         "stage3": stage3_result,
         "metadata": metadata
     }
+
+
+@app.post("/api/settings/bedrock-token")
+async def update_bedrock_token(request: UpdateBedrockTokenRequest):
+    """
+    Update the Bedrock API key at runtime (in-memory only).
+    """
+    token = request.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+
+    set_bedrock_api_key(token)
+    return {"status": "ok"}
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")

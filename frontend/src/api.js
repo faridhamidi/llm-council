@@ -112,4 +112,22 @@ export const api = {
       }
     }
   },
+
+  /**
+   * Update the Bedrock API token at runtime.
+   */
+  async updateBedrockToken(token) {
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to update Bedrock token');
+    }
+    return response.json();
+  },
 };

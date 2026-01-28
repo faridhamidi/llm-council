@@ -50,13 +50,22 @@ Edit `backend/config.py` to customize the council:
 
 ```python
 COUNCIL_MODELS = [
-    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "global.anthropic.claude-opus-4-5-20251101-v1:0",
-    "apac.anthropic.claude-3-7-sonnet-20250219-v1:0",
-    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ]
 
-CHAIRMAN_MODEL = "global.anthropic.claude-opus-4-5-20251101-v1:0"
+COUNCIL_ALIASES = [
+    "Councilor A",
+    "Councilor B",
+    "Councilor C",
+    "Councilor D",
+]
+
+CHAIRMAN_MODEL = "us.anthropic.claude-opus-4-5-20251101-v1:0"
+CHAIRMAN_ALIAS = "Chairman"
+TITLE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 ```
 
 ## Running the Application

@@ -2,7 +2,7 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import BEDROCK_API_KEY, BEDROCK_RUNTIME_URL
+from .config import BEDROCK_RUNTIME_URL, get_bedrock_api_key
 
 
 async def query_model(
@@ -21,12 +21,13 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
-    if not BEDROCK_API_KEY:
+    bedrock_api_key = get_bedrock_api_key()
+    if not bedrock_api_key:
         print("Error: BEDROCK_API_KEY (or AWS_BEARER_TOKEN_BEDROCK) is not set.")
         return None
 
     headers = {
-        "Authorization": f"Bearer {BEDROCK_API_KEY}",
+        "Authorization": f"Bearer {bedrock_api_key}",
         "Content-Type": "application/json",
     }
 

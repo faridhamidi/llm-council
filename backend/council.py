@@ -2,7 +2,18 @@
 
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, COUNCIL_ALIASES, CHAIRMAN_MODEL, CHAIRMAN_ALIAS, TITLE_MODEL
+
+
+def _model_alias_map() -> Dict[str, str]:
+    """Map model identifiers to display aliases for UI anonymity."""
+    if len(COUNCIL_ALIASES) != len(COUNCIL_MODELS):
+        return {model: model for model in COUNCIL_MODELS}
+    return dict(zip(COUNCIL_MODELS, COUNCIL_ALIASES))
+
+
+def _display_name(model: str, alias_map: Dict[str, str]) -> str:
+    return alias_map.get(model, model)
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -19,13 +30,14 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    alias_map = _model_alias_map()
 
     # Format results
     stage1_results = []
     for model, response in responses.items():
         if response is not None:  # Only include successful responses
             stage1_results.append({
-                "model": model,
+                "model": _display_name(model, alias_map),
                 "response": response.get('content', '')
             })
 
@@ -96,6 +108,7 @@ Now provide your evaluation and ranking:"""
 
     # Get rankings from all council models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    alias_map = _model_alias_map()
 
     # Format results
     stage2_results = []
@@ -104,7 +117,7 @@ Now provide your evaluation and ranking:"""
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
-                "model": model,
+                "model": _display_name(model, alias_map),
                 "ranking": full_text,
                 "parsed_ranking": parsed
             })
@@ -164,12 +177,12 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": CHAIRMAN_ALIAS,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": CHAIRMAN_ALIAS,
         "response": response.get('content', '')
     }
 
@@ -275,7 +288,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    response = await query_model(TITLE_MODEL, messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title

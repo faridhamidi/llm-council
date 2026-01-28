@@ -12,7 +12,10 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`config.py`**
 - Contains `COUNCIL_MODELS` (list of Bedrock model or inference profile identifiers)
+- Contains `COUNCIL_ALIASES` to display anonymous names in the UI
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
+- Contains `CHAIRMAN_ALIAS` for UI display
+- Contains `TITLE_MODEL` for conversation title generation
 - Uses environment variable `BEDROCK_API_KEY` (or `AWS_BEARER_TOKEN_BEDROCK`) from `.env`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 

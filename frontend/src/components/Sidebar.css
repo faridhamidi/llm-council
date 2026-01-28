@@ -36,6 +36,43 @@
   border-color: #357abd;
 }
 
+.token-refresh-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px;
+  background: #fff;
+  border: 1px solid #c7d6ea;
+  border-radius: 6px;
+  color: #1d4f8b;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.token-refresh-btn:hover {
+  background: #f1f7ff;
+  border-color: #9bbbe5;
+}
+
+.token-status {
+  margin-top: 10px;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.token-status.success {
+  background: #e7f7ed;
+  color: #1a5f32;
+  border: 1px solid #b8e2c6;
+}
+
+.token-status.error {
+  background: #fdecec;
+  color: #9c2f2f;
+  border: 1px solid #f5b7b7;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
@@ -75,4 +112,96 @@
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.token-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.token-modal {
+  width: min(420px, 92vw);
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  padding: 16px;
+}
+
+.token-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.token-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.token-modal-close {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.token-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.token-modal-body label {
+  font-size: 13px;
+  color: #374151;
+}
+
+.token-modal-body textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.token-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.token-cancel-btn {
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.token-save-btn {
+  padding: 8px 12px;
+  background: #2563eb;
+  border: 1px solid #2563eb;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.token-save-btn:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
 }
