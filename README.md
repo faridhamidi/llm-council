@@ -68,6 +68,20 @@ CHAIRMAN_ALIAS = "Chairman"
 TITLE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 ```
 
+### Council Settings (UI)
+
+You can now manage council members, aliases, chairman, and title model from the UI:
+
+1. Click **Council Settings** in the sidebar.
+2. Add/remove members (max 7).
+3. Drag cards to reorder.
+4. Pick models from the Converse‑compatible list for the current region.
+5. Click **Save Settings** to apply instantly (no restart).
+
+Notes:
+- Region and API key updates are in‑memory and reset on backend restart.
+- If a model is not available in the selected region, it will be rejected.
+
 ## Running the Application
 
 **Option 1: Use the start script**

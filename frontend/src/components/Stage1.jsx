@@ -18,21 +18,28 @@ export default function Stage1({ responses }) {
         {responses.map((resp, index) => (
           <button
             key={index}
-            className={`tab ${activeTab === index ? 'active' : ''}`}
+            className={`tab ${activeTab === index ? 'active' : ''} ${resp.status === 'failed' ? 'failed' : ''}`}
             onClick={() => setActiveTab(index)}
           >
-            {resp.model}
+            {resp.model}{resp.status === 'failed' ? ' (failed)' : ''}
           </button>
         ))}
       </div>
 
       <div className="tab-content">
         <div className="model-name">{responses[activeTab].model}</div>
-        <div className="response-text markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {responses[activeTab].response}
-          </ReactMarkdown>
-        </div>
+        {responses[activeTab].status === 'failed' ? (
+          <div className="response-text markdown-content">
+            <p><strong>Failed to respond.</strong></p>
+            {responses[activeTab].error && <p>{responses[activeTab].error}</p>}
+          </div>
+        ) : (
+          <div className="response-text markdown-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {responses[activeTab].response}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

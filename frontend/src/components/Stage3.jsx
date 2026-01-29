@@ -3,7 +3,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Stage3.css';
 
-export default function Stage3({ finalResponse }) {
+function deAnonymizeText(text, labelToModel) {
+  if (!labelToModel) return text;
+  let result = text;
+  Object.entries(labelToModel).forEach(([label, model]) => {
+    result = result.replace(new RegExp(label, 'g'), `**${model}**`);
+  });
+  return result;
+}
+
+export default function Stage3({ finalResponse, labelToModel }) {
   const [copied, setCopied] = useState(false);
 
   if (!finalResponse) {
@@ -11,7 +20,8 @@ export default function Stage3({ finalResponse }) {
   }
 
   const handleCopy = async () => {
-    const text = `Chairman: ${finalResponse.model}\n\n${finalResponse.response || ''}`;
+    const raw = finalResponse.response || '';
+    const text = `Chairman: ${finalResponse.model}\n\n${deAnonymizeText(raw, labelToModel)}`;
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -45,7 +55,7 @@ export default function Stage3({ finalResponse }) {
         </div>
         <div className="final-text markdown-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {finalResponse.response}
+            {deAnonymizeText(finalResponse.response, labelToModel)}
           </ReactMarkdown>
         </div>
       </div>

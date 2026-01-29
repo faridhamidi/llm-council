@@ -15,6 +15,12 @@ export default function Sidebar({
   const [regionOptions, setRegionOptions] = useState([]);
   const [selectedRegion, setSelectedRegion] = useState('');
   const [regionStatus, setRegionStatus] = useState(null);
+  const [isCouncilModalOpen, setIsCouncilModalOpen] = useState(false);
+  const [councilSettings, setCouncilSettings] = useState(null);
+  const [councilModels, setCouncilModels] = useState([]);
+  const [councilError, setCouncilError] = useState(null);
+  const [isCouncilSaving, setIsCouncilSaving] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -64,14 +70,116 @@ export default function Sidebar({
     }
   };
 
+  const openCouncilModal = async () => {
+    setCouncilError(null);
+    setIsCouncilModalOpen(true);
+    try {
+      const [settingsResponse, modelsResponse] = await Promise.all([
+        api.getCouncilSettings(),
+        api.listBedrockModels(),
+      ]);
+      setCouncilSettings(settingsResponse);
+      setCouncilModels(modelsResponse.models || []);
+    } catch (error) {
+      setCouncilError(error.message || 'Failed to load council settings.');
+    }
+  };
+
+  const closeCouncilModal = () => {
+    setIsCouncilModalOpen(false);
+    setDraggedIndex(null);
+  };
+
+  const updateMember = (memberId, updates) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const nextMembers = prev.members.map((member) =>
+        member.id === memberId ? { ...member, ...updates } : member
+      );
+      return { ...prev, members: nextMembers };
+    });
+  };
+
+  const handleAddMember = () => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const maxMembers = prev.max_members || 7;
+      if (prev.members.length >= maxMembers) return prev;
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `member-${Date.now()}`;
+      const defaultModel = councilModels[0]?.id || '';
+      const newMember = {
+        id: newId,
+        alias: `Member ${prev.members.length + 1}`,
+        model_id: defaultModel,
+      };
+      return { ...prev, members: [...prev.members, newMember] };
+    });
+  };
+
+  const handleRemoveMember = (memberId) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      if (prev.members.length <= 1) return prev;
+      const nextMembers = prev.members.filter((member) => member.id !== memberId);
+      const nextChairman =
+        prev.chairman_id === memberId && nextMembers.length
+          ? nextMembers[0].id
+          : prev.chairman_id;
+      return { ...prev, members: nextMembers, chairman_id: nextChairman };
+    });
+  };
+
+  const handleDragStart = (index) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDrop = (index) => {
+    setCouncilSettings((prev) => {
+      if (!prev || draggedIndex === null || draggedIndex === index) return prev;
+      const nextMembers = [...prev.members];
+      const [moved] = nextMembers.splice(draggedIndex, 1);
+      nextMembers.splice(index, 0, moved);
+      return { ...prev, members: nextMembers };
+    });
+    setDraggedIndex(null);
+  };
+
+  const handleSaveCouncil = async () => {
+    if (!councilSettings) return;
+    setIsCouncilSaving(true);
+    setCouncilError(null);
+    try {
+      const payload = {
+        members: councilSettings.members,
+        chairman_id: councilSettings.chairman_id,
+        chairman_label: councilSettings.chairman_label || 'Chairman',
+        title_model_id: councilSettings.title_model_id,
+      };
+      await api.updateCouncilSettings(payload);
+      setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
+      setIsCouncilModalOpen(false);
+    } catch (error) {
+      setCouncilError(error.message || 'Failed to update council settings.');
+    } finally {
+      setIsCouncilSaving(false);
+    }
+  };
+
   const handleRegionUpdate = async () => {
     if (!selectedRegion) {
       setRegionStatus({ type: 'error', message: 'Select a region first.' });
       return;
     }
     try {
-      await api.updateBedrockRegion(selectedRegion);
+      const response = await api.updateBedrockRegion(selectedRegion);
       setRegionStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
+      if (response.settings && isCouncilModalOpen) {
+        setCouncilSettings(response.settings);
+        const modelsResponse = await api.listBedrockModels();
+        setCouncilModels(modelsResponse.models || []);
+      }
     } catch (error) {
       setRegionStatus({ type: 'error', message: error.message || 'Failed to update region.' });
     }
@@ -86,6 +194,9 @@ export default function Sidebar({
         </button>
         <button className="token-refresh-btn" onClick={openTokenModal}>
           Refresh Bedrock Token
+        </button>
+        <button className="token-refresh-btn" onClick={openCouncilModal}>
+          Council Settings
         </button>
         <div className="region-selector">
           <label htmlFor="bedrock-region-select">Bedrock Region</label>
@@ -185,6 +296,126 @@ export default function Sidebar({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isCouncilModalOpen && (
+        <div className="token-modal-backdrop" onClick={closeCouncilModal}>
+          <div className="token-modal council-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="token-modal-header">
+              <h3>Council Members</h3>
+              <button className="token-modal-close" onClick={closeCouncilModal}>
+                ×
+              </button>
+            </div>
+            <div className="council-meta">
+              {councilSettings && (
+                <span>
+                  {councilSettings.members.length} / {councilSettings.max_members || 7} members
+                </span>
+              )}
+              <button
+                className="region-apply-btn"
+                onClick={handleAddMember}
+                disabled={!councilSettings || councilSettings.members.length >= (councilSettings.max_members || 7)}
+              >
+                + Add member
+              </button>
+            </div>
+            {councilError && <div className="token-status error">{councilError}</div>}
+            {!councilSettings ? (
+              <div className="token-status">Loading settings...</div>
+            ) : (
+              <>
+                <div className="token-status hint">
+                  Drag cards to reorder. Updates apply to new messages immediately after saving.
+                </div>
+                <div className="council-grid">
+                  {councilSettings.members.map((member, index) => (
+                    <div
+                      key={member.id}
+                      className="council-card"
+                      draggable
+                      onDragStart={() => handleDragStart(index)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => handleDrop(index)}
+                    >
+                      <div className="council-card-header">
+                        <span className="drag-handle">⋮⋮</span>
+                        <span className="council-card-title">Member {index + 1}</span>
+                        <button
+                          className="conversation-delete-btn"
+                          onClick={() => handleRemoveMember(member.id)}
+                          title="Remove member"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <label>
+                        Alias
+                        <input
+                          type="text"
+                          value={member.alias}
+                          onChange={(event) => updateMember(member.id, { alias: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Model
+                        <select
+                          value={member.model_id}
+                          onChange={(event) => updateMember(member.id, { model_id: event.target.value })}
+                        >
+                          {councilModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label} ({model.id})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className={`chairman-btn ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
+                        onClick={() =>
+                          setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
+                        }
+                      >
+                        {councilSettings.chairman_id === member.id ? 'Chairman' : 'Set Chairman'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="council-footer">
+                  <label className="title-model">
+                    Title model
+                    <select
+                      value={councilSettings.title_model_id}
+                      onChange={(event) =>
+                        setCouncilSettings((prev) => ({ ...prev, title_model_id: event.target.value }))
+                      }
+                    >
+                      {councilModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label} ({model.id})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="token-modal-actions">
+                    <button type="button" className="token-cancel-btn" onClick={closeCouncilModal}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="token-save-btn"
+                      onClick={handleSaveCouncil}
+                      disabled={isCouncilSaving}
+                    >
+                      {isCouncilSaving ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

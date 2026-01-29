@@ -10,7 +10,19 @@ import json
 import asyncio
 
 from . import storage
-from .config import set_bedrock_api_key, get_bedrock_region, set_bedrock_region, BEDROCK_REGION_OPTIONS
+from .config import (
+    set_bedrock_api_key,
+    get_bedrock_region,
+    set_bedrock_region,
+    BEDROCK_REGION_OPTIONS,
+    list_converse_models_for_region,
+)
+from .council_settings import (
+    get_settings,
+    update_settings,
+    MAX_COUNCIL_MEMBERS,
+    normalize_settings_for_region,
+)
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
@@ -46,6 +58,19 @@ class UpdateBedrockTokenRequest(BaseModel):
 class UpdateBedrockRegionRequest(BaseModel):
     """Request to update the Bedrock region at runtime."""
     region: str
+
+
+class CouncilMemberConfig(BaseModel):
+    id: str
+    alias: str
+    model_id: str
+
+
+class CouncilSettingsRequest(BaseModel):
+    members: List[CouncilMemberConfig]
+    chairman_id: str
+    chairman_label: str | None = "Chairman"
+    title_model_id: str
 
 
 class ConversationMetadata(BaseModel):
@@ -193,7 +218,74 @@ async def update_bedrock_region(request: UpdateBedrockRegionRequest):
         raise HTTPException(status_code=400, detail="Unsupported region")
 
     set_bedrock_region(region)
-    return {"status": "ok", "region": region}
+    settings = normalize_settings_for_region(get_settings(), region)
+    update_settings(settings)
+    return {"status": "ok", "region": region, "settings": settings}
+
+
+@app.get("/api/settings/council")
+async def get_council_settings():
+    """Return current council settings."""
+    return get_settings()
+
+
+@app.get("/api/settings/bedrock-models")
+async def get_bedrock_models():
+    """Return Converse-capable models for the current region."""
+    region = get_bedrock_region()
+    return {"region": region, "models": list_converse_models_for_region(region)}
+
+
+def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
+    errors: List[str] = []
+    members = payload.members
+    if not members:
+        errors.append("At least one council member is required.")
+    if len(members) > MAX_COUNCIL_MEMBERS:
+        errors.append(f"Maximum {MAX_COUNCIL_MEMBERS} council members allowed.")
+
+    ids = [member.id for member in members]
+    aliases = [member.alias.strip() for member in members]
+    if len(set(ids)) != len(ids):
+        errors.append("Member IDs must be unique.")
+    if len(set(a.lower() for a in aliases)) != len(aliases):
+        errors.append("Member aliases must be unique.")
+    if any(not alias for alias in aliases):
+        errors.append("Member aliases cannot be empty.")
+
+    allowed_models = {model["id"] for model in list_converse_models_for_region(get_bedrock_region())}
+    for member in members:
+        if member.model_id not in allowed_models:
+            errors.append(f"Unsupported model for region: {member.model_id}")
+            break
+
+    if payload.title_model_id not in allowed_models:
+        errors.append(f"Unsupported title model for region: {payload.title_model_id}")
+
+    if payload.chairman_id not in ids:
+        errors.append("Chairman must be one of the council members.")
+
+    return errors
+
+
+@app.post("/api/settings/council")
+async def update_council_settings(request: CouncilSettingsRequest):
+    """Update council settings."""
+    errors = _validate_council_settings(request)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    settings = {
+        "version": 1,
+        "max_members": MAX_COUNCIL_MEMBERS,
+        "members": [member.model_dump() for member in request.members],
+        "chairman_id": request.chairman_id,
+        "chairman_label": request.chairman_label or "Chairman",
+        "title_model_id": request.title_model_id,
+    }
+
+    update_settings(settings)
+    return {"status": "ok", "settings": settings}
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")

@@ -27,7 +27,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
       <h4>Raw Evaluations</h4>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
+        Each model evaluated all responses using anonymized labels and provided rankings.
         Below, member aliases are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
       </p>
 

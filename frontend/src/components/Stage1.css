@@ -45,6 +45,12 @@
   font-weight: 600;
 }
 
+.tab.failed {
+  background: #fdecec;
+  color: #b42318;
+  border-color: #f5b7b7;
+}
+
 .tab-content {
   background: #ffffff;
   padding: 16px;

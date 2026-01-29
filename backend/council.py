@@ -2,18 +2,31 @@
 
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, COUNCIL_ALIASES, CHAIRMAN_MODEL, CHAIRMAN_ALIAS, TITLE_MODEL
+from .council_settings import get_settings
 
 
-def _model_alias_map() -> Dict[str, str]:
-    """Map model identifiers to display aliases for UI anonymity."""
-    if len(COUNCIL_ALIASES) != len(COUNCIL_MODELS):
-        return {model: model for model in COUNCIL_MODELS}
-    return dict(zip(COUNCIL_MODELS, COUNCIL_ALIASES))
+def _council_config() -> Tuple[List[Dict[str, Any]], Dict[str, str], str, str, str]:
+    """
+    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id).
+    """
+    settings = get_settings()
+    members = settings.get("members", [])
+    alias_map = {member["model_id"]: member.get("alias", member["model_id"]) for member in members}
 
+    chairman_id = settings.get("chairman_id")
+    chairman_label = settings.get("chairman_label", "Chairman")
+    title_model_id = settings.get("title_model_id", "")
 
-def _display_name(model: str, alias_map: Dict[str, str]) -> str:
-    return alias_map.get(model, model)
+    chairman_model_id = ""
+    if chairman_id:
+        for member in members:
+            if member.get("id") == chairman_id:
+                chairman_model_id = member.get("model_id", "")
+                break
+    if not chairman_model_id and members:
+        chairman_model_id = members[0].get("model_id", "")
+
+    return members, alias_map, chairman_model_id, chairman_label, title_model_id
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -29,16 +42,26 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-    alias_map = _model_alias_map()
+    members, alias_map, _, _, _ = _council_config()
+    models = [member["model_id"] for member in members]
+    responses = await query_models_parallel(models, messages)
 
     # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        content = response.get("content") if response else None
+        if content:
             stage1_results.append({
-                "model": _display_name(model, alias_map),
-                "response": response.get('content', '')
+                "model": alias_map.get(model, model),
+                "response": content,
+                "status": "ok",
+            })
+        else:
+            stage1_results.append({
+                "model": alias_map.get(model, model),
+                "response": "",
+                "status": "failed",
+                "error": (response or {}).get("error", "No response received."),
             })
 
     return stage1_results
@@ -58,20 +81,32 @@ async def stage2_collect_rankings(
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
+    # Only include successful responses in rankings.
+    successful_results = [
+        result for result in stage1_results
+        if result.get("status") != "failed" and result.get("response")
+    ]
+
+    if not successful_results:
+        return [], {}
+
     # Create anonymized labels for responses (Response A, Response B, etc.)
-    labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
+    labels = [chr(65 + i) for i in range(len(successful_results))]  # A, B, C, ...
 
     # Create mapping from label to model name
     label_to_model = {
         f"Response {label}": result['model']
-        for label, result in zip(labels, stage1_results)
+        for label, result in zip(labels, successful_results)
     }
 
     # Build the ranking prompt
     responses_text = "\n\n".join([
         f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
+        for label, result in zip(labels, successful_results)
     ])
+
+    response_labels = [f"Response {label}" for label in labels]
+    response_count = len(response_labels)
 
     ranking_prompt = f"""You are evaluating different responses to the following question:
 
@@ -84,6 +119,9 @@ Here are the responses from different models (anonymized):
 Your task:
 1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
 2. Then, at the very end of your response, provide a final ranking.
+
+IMPORTANT: You MUST rank all {response_count} responses exactly once.
+The responses are: {", ".join(response_labels)}.
 
 IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
 - Start with the line "FINAL RANKING:" (all caps, with colon)
@@ -107,17 +145,18 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-    alias_map = _model_alias_map()
+    members, alias_map, _, _, _ = _council_config()
+    models = [member["model_id"] for member in members]
+    responses = await query_models_parallel(models, messages)
 
     # Format results
     stage2_results = []
     for model, response in responses.items():
-        if response is not None:
+        if response is not None and response.get('content'):
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
-                "model": _display_name(model, alias_map),
+                "model": alias_map.get(model, model),
                 "ranking": full_text,
                 "parsed_ranking": parsed
             })
@@ -142,10 +181,18 @@ async def stage3_synthesize_final(
         Dict with 'model' and 'response' keys
     """
     # Build comprehensive context for chairman
-    stage1_text = "\n\n".join([
-        f"Model: {result['model']}\nResponse: {result['response']}"
-        for result in stage1_results
-    ])
+    stage1_lines = []
+    for result in stage1_results:
+        if result.get("status") == "failed":
+            error_detail = result.get("error", "No response received.")
+            stage1_lines.append(
+                f"Model: {result['model']}\nResponse: [FAILED]\nError: {error_detail}"
+            )
+        else:
+            stage1_lines.append(
+                f"Model: {result['model']}\nResponse: {result['response']}"
+            )
+    stage1_text = "\n\n".join(stage1_lines)
 
     stage2_text = "\n\n".join([
         f"Model: {result['model']}\nRanking: {result['ranking']}"
@@ -172,17 +219,18 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    _, _, chairman_model_id, chairman_label, _ = _council_config()
+    response = await query_model(chairman_model_id, messages)
 
-    if response is None:
+    if response is None or not response.get("content"):
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_ALIAS,
+            "model": chairman_label,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_ALIAS,
+        "model": chairman_label,
         "response": response.get('content', '')
     }
 
@@ -288,9 +336,11 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model(TITLE_MODEL, messages, timeout=30.0)
+    members, _, chairman_model_id, _, title_model_id = _council_config()
+    fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
+    response = await query_model(title_model_id or fallback_model, messages, timeout=30.0)
 
-    if response is None:
+    if response is None or not response.get("content"):
         # Fallback to a generic title
         return "New Conversation"
 

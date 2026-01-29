@@ -33,6 +33,255 @@ def set_bedrock_region(region: str) -> None:
 def get_bedrock_runtime_url() -> str:
     return f"https://bedrock-runtime.{_AWS_REGION}.amazonaws.com"
 
+# Converse-capable Bedrock model families (curated list).
+CONVERSE_MODEL_FAMILIES = [
+    {
+        "family_id": "claude-opus-4-5",
+        "label": "Claude Opus 4.5",
+        "provider": "anthropic",
+        "variants": {
+            "us": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+            "global": "global.anthropic.claude-opus-4-5-20251101-v1:0",
+        },
+    },
+    {
+        "family_id": "claude-sonnet-4-5",
+        "label": "Claude Sonnet 4.5",
+        "provider": "anthropic",
+        "variants": {
+            "us": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "global": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        },
+    },
+    {
+        "family_id": "claude-haiku-4-5",
+        "label": "Claude Haiku 4.5",
+        "provider": "anthropic",
+        "variants": {
+            "us": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "global": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        },
+    },
+    {
+        "family_id": "claude-sonnet-3-7",
+        "label": "Claude Sonnet 3.7",
+        "provider": "anthropic",
+        "variants": {
+            "us": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "apac": "apac.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-4-maverick",
+        "label": "Llama 4 Maverick 17B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama4-maverick-17b-instruct-v1:0",
+            "global": "meta.llama4-maverick-17b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-4-scout",
+        "label": "Llama 4 Scout 17B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama4-scout-17b-instruct-v1:0",
+            "global": "meta.llama4-scout-17b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-3-70b",
+        "label": "Llama 3.3 70B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-3-70b-instruct-v1:0",
+            "global": "meta.llama3-3-70b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-2-90b",
+        "label": "Llama 3.2 90B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-2-90b-instruct-v1:0",
+            "global": "meta.llama3-2-90b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-2-11b",
+        "label": "Llama 3.2 11B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-2-11b-instruct-v1:0",
+            "global": "meta.llama3-2-11b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-2-3b",
+        "label": "Llama 3.2 3B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-2-3b-instruct-v1:0",
+            "global": "meta.llama3-2-3b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-2-1b",
+        "label": "Llama 3.2 1B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-2-1b-instruct-v1:0",
+            "global": "meta.llama3-2-1b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-1-405b",
+        "label": "Llama 3.1 405B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-1-405b-instruct-v1:0",
+            "global": "meta.llama3-1-405b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-1-70b",
+        "label": "Llama 3.1 70B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-1-70b-instruct-v1:0",
+            "global": "meta.llama3-1-70b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-1-8b",
+        "label": "Llama 3.1 8B Instruct",
+        "provider": "meta",
+        "variants": {
+            "us": "us.meta.llama3-1-8b-instruct-v1:0",
+            "global": "meta.llama3-1-8b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-70b",
+        "label": "Llama 3 70B Instruct",
+        "provider": "meta",
+        "variants": {
+            "global": "meta.llama3-70b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "llama-3-8b",
+        "label": "Llama 3 8B Instruct",
+        "provider": "meta",
+        "variants": {
+            "global": "meta.llama3-8b-instruct-v1:0",
+        },
+    },
+    {
+        "family_id": "deepseek-r1",
+        "label": "DeepSeek R1",
+        "provider": "deepseek",
+        "variants": {
+            "us": "us.deepseek.r1-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-nova-premier",
+        "label": "Amazon Nova Premier",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.nova-premier-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-nova-pro",
+        "label": "Amazon Nova Pro",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.nova-pro-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-nova-lite",
+        "label": "Amazon Nova Lite",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.nova-lite-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-nova-micro",
+        "label": "Amazon Nova Micro",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.nova-micro-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-titan-text-premier",
+        "label": "Amazon Titan Text Premier",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.titan-text-premier-v1:0",
+        },
+    },
+    {
+        "family_id": "amazon-titan-text-express",
+        "label": "Amazon Titan Text Express",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.titan-text-express-v1",
+        },
+    },
+    {
+        "family_id": "amazon-titan-text-lite",
+        "label": "Amazon Titan Text Lite",
+        "provider": "amazon",
+        "variants": {
+            "global": "amazon.titan-text-lite-v1",
+        },
+    },
+]
+
+
+def _region_scope(region: str) -> str:
+    if region.startswith("us-"):
+        return "us"
+    if region.startswith("ap-"):
+        return "apac"
+    return "global"
+
+
+def list_converse_models_for_region(region: str) -> list[dict]:
+    """List models for a region, picking the best variant per family."""
+    scope = _region_scope(region)
+    models: list[dict] = []
+    for family in CONVERSE_MODEL_FAMILIES:
+        variants = family.get("variants", {})
+        model_id = variants.get(scope) or variants.get("global")
+        if not model_id:
+            continue
+        models.append(
+            {
+                "id": model_id,
+                "label": family["label"],
+                "provider": family["provider"],
+                "family_id": family["family_id"],
+                "variant": scope if variants.get(scope) else "global",
+            }
+        )
+    return models
+
+
+def resolve_model_for_region(model_id: str, region: str) -> str:
+    """Swap model id to region-appropriate variant if available."""
+    scope = _region_scope(region)
+    for family in CONVERSE_MODEL_FAMILIES:
+        variants = family.get("variants", {})
+        if model_id in variants.values():
+            return variants.get(scope) or variants.get("global") or model_id
+    return model_id
+
 # Council members - list of Bedrock model or inference profile identifiers
 COUNCIL_MODELS = [
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",

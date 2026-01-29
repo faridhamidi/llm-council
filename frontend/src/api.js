@@ -208,6 +208,46 @@ export const api = {
   },
 
   /**
+   * Get council settings.
+   */
+  async getCouncilSettings() {
+    const response = await fetch(`${API_BASE}/api/settings/council`);
+    if (!response.ok) {
+      throw new Error('Failed to load council settings');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update council settings.
+   */
+  async updateCouncilSettings(settings) {
+    const response = await fetch(`${API_BASE}/api/settings/council`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(settings),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to update council settings');
+    }
+    return response.json();
+  },
+
+  /**
+   * List Bedrock Converse-capable models for the current region.
+   */
+  async listBedrockModels() {
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-models`);
+    if (!response.ok) {
+      throw new Error('Failed to load Bedrock models');
+    }
+    return response.json();
+  },
+
+  /**
    * Cancel an active streaming message for a conversation.
    */
   async cancelMessageStream(conversationId) {
