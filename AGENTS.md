@@ -1,152 +1,145 @@
-# CLAUDE.md - Technical Notes for LLM Council
+# AGENTS.md - Technical Notes for LLM Council
 
 This file contains technical details, architectural decisions, and important implementation notes for future development sessions.
 
 ## Project Overview
 
-LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
+LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites. The app is a local web UI backed by a FastAPI server that calls Amazon Bedrock Runtime (Converse API).
 
 ## Architecture
 
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of Bedrock model or inference profile identifiers)
-- Contains `COUNCIL_ALIASES` to display anonymous names in the UI
-- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Contains `CHAIRMAN_ALIAS` for UI display
-- Contains `TITLE_MODEL` for conversation title generation
-- Uses environment variable `BEDROCK_API_KEY` (or `AWS_BEARER_TOKEN_BEDROCK`) from `.env`
-- Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
+- Loads Bedrock API key from `BEDROCK_API_KEY` (or `AWS_BEARER_TOKEN_BEDROCK`).
+- Tracks current Bedrock region and exposes a curated list of Converse-capable model families.
+- Defines defaults: `COUNCIL_MODELS`, `COUNCIL_ALIASES`, `CHAIRMAN_MODEL`, `CHAIRMAN_ALIAS`, `TITLE_MODEL`.
+- Defines `BEDROCK_REGION_OPTIONS` for the UI and `DATA_DIR` for storage.
+- Backend runs on **port 8001** (not 8000).
 
 **`openrouter.py`**
-- `query_model()`: Single async model query (Bedrock Runtime Converse)
-- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
-- Returns dict with 'content' and optional 'reasoning_details'
-- Graceful degradation: returns None on failure, continues with successful responses
+- `query_model()`: Single async model query (Bedrock Runtime Converse).
+- Supports per-model system prompt (sent as `system`).
+- If a model rejects the system prompt (400), retries without it and marks `system_prompt_dropped`.
+- Returns dict with `content` and optional `reasoning_details`, or `{error: ...}` on failure (may be `None` if no API key).
 
-**`council.py`** - The Core Logic
-- `stage1_collect_responses()`: Parallel queries to all council models
-- `stage2_collect_rankings()`:
-  - Anonymizes responses as "Response A, B, C, etc."
-  - Creates `label_to_model` mapping for de-anonymization
-  - Prompts models to evaluate and rank (with strict format requirements)
-  - Returns tuple: (rankings_list, label_to_model_dict)
-  - Each ranking includes both raw text and `parsed_ranking` list
-- `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
-- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
-- `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+**`council.py`** (Core logic)
+- `stage1_collect_responses()`: Parallel queries to all council members, keeps per-member status and error.
+- `stage2_collect_rankings()`: Anonymizes responses as `Response A/B/C`, prompts models to rank, returns `(rankings, label_to_model)`.
+- `parse_ranking_from_text()`: Extracts `FINAL RANKING:` list with fallback regex.
+- `calculate_aggregate_rankings()`: Average rank position across peer evaluations.
+- `stage3_synthesize_final()`: Chairman synthesizes from Stage 1 + Stage 2 context.
+- `generate_conversation_title()`: Title model generates a short conversation title.
+
+**`council_settings.py`**
+- Runtime-configurable council settings persisted to `data/council_settings.json`.
+- Members are configurable (max 7), with per-member `system_prompt`.
+- Toggles to disable system prompts in Stage 2 & 3 (`use_system_prompt_stage2`, `use_system_prompt_stage3`).
+- Region normalization maps model IDs to the selected region scope when possible.
+
+**`council_presets.py`**
+- Presets are persisted in `data/council_presets.json`.
+- Supports save/update, apply, and delete.
 
 **`storage.py`**
-- JSON-based conversation storage in `data/conversations/`
-- Each conversation: `{id, created_at, messages[]}`
-- Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- JSON-based conversation storage in `data/conversations/`.
+- Soft-delete via `data/conversations/.trash/` with restore.
+- Assistant messages contain `{role, stage1, stage2, stage3}`.
+- Metadata (label_to_model, aggregate_rankings) is **not** persisted.
 
 **`main.py`**
-- FastAPI app with CORS enabled for localhost:5173 and localhost:3000
-- POST `/api/conversations/{id}/message` returns metadata in addition to stages
-- Metadata includes: label_to_model mapping and aggregate_rankings
+- FastAPI app with CORS enabled for localhost:5173 and localhost:3000.
+- `/api/conversations/{id}/message`: Non-streaming, returns stages + metadata.
+- `/api/conversations/{id}/message/stream`: SSE streaming for stage1/2/3.
+- `/api/conversations/{id}/message/cancel`: Cancel active stream.
+- `/api/settings/*`: Bedrock region, models, council settings, and presets.
 
 ### Frontend Structure (`frontend/src/`)
 
 **`App.jsx`**
-- Main orchestration: manages conversations list and current conversation
-- Handles message sending and metadata storage
-- Important: metadata is stored in the UI state for display but not persisted to backend JSON
+- Orchestrates conversation list + active conversation.
+- SSE streaming updates for stages; supports stop/cancel.
+- Handles soft-delete with undo UI.
 
 **`components/ChatInterface.jsx`**
-- Multiline textarea (3 rows, resizable)
-- Enter to send, Shift+Enter for new line
-- User messages wrapped in markdown-content class for padding
+- Multiline textarea; Enter to send, Shift+Enter for new line.
+- Builds label map if metadata is missing (fallback to Stage 1 order).
 
 **`components/Stage1.jsx`**
-- Tab view of individual model responses
-- ReactMarkdown rendering with markdown-content wrapper
+- Tab view of individual responses.
+- Displays error state and system prompt drop warning.
 
 **`components/Stage2.jsx`**
-- **Critical Feature**: Tab view showing RAW evaluation text from each model
-- De-anonymization happens CLIENT-SIDE for display (models receive anonymous labels)
-- Shows "Extracted Ranking" below each evaluation so users can validate parsing
-- Aggregate rankings shown with average position and vote count
-- Explanatory text clarifies that boldface model names are for readability only
+- Shows raw peer evaluations (de‑anonymized client‑side for readability).
+- Displays parsed ranking list per model.
+- Shows aggregate rankings (avg rank + vote count).
 
 **`components/Stage3.jsx`**
-- Final synthesized answer from chairman
-- Green-tinted background (#f0fff0) to highlight conclusion
+- Final synthesized answer with copy-to-clipboard support.
+- De‑anonymizes labels client‑side for readability.
 
 **Styling (`*.css`)**
-- Light mode theme (not dark mode)
-- Primary color: #4a90e2 (blue)
-- Global markdown styling in `index.css` with `.markdown-content` class
-- 12px padding on all markdown content to prevent cluttered appearance
+- Light theme with global `.markdown-content` styling in `index.css`.
+- Stage 3 has a green‑tinted background to highlight the final answer.
 
 ## Key Design Decisions
 
 ### Stage 2 Prompt Format
-The Stage 2 prompt is very specific to ensure parseable output:
+A strict format ensures reliable parsing:
 ```
-1. Evaluate each response individually first
+1. Evaluate each response individually
 2. Provide "FINAL RANKING:" header
-3. Numbered list format: "1. Response C", "2. Response A", etc.
-4. No additional text after ranking section
+3. Numbered list: "1. Response C", "2. Response A", etc.
+4. No extra text after ranking section
 ```
 
-This strict format allows reliable parsing while still getting thoughtful evaluations.
-
-### De-anonymization Strategy
-- Models receive: "Response A", "Response B", etc.
-- Backend creates mapping: `{"Response A": "openai/gpt-5.1", ...}`
-- Frontend displays model names in **bold** for readability
-- Users see explanation that original evaluation used anonymous labels
-- This prevents bias while maintaining transparency
+### De‑anonymization Strategy
+- Models see: `Response A`, `Response B`, etc.
+- Backend returns `label_to_model` mapping for UI display.
+- Frontend renders model names in **bold** for readability while preserving the anonymized ranking process.
 
 ### Error Handling Philosophy
-- Continue with successful responses if some models fail (graceful degradation)
-- Never fail the entire request due to single model failure
-- Log errors but don't expose to user unless all models fail
+- Continue with successful responses if some models fail.
+- Never fail the entire request due to one model failure.
+- Stage 1 tracks failures per member and surfaces them in the UI.
 
 ### UI/UX Transparency
-- All raw outputs are inspectable via tabs
-- Parsed rankings shown below raw text for validation
-- Users can verify system's interpretation of model outputs
-- This builds trust and allows debugging of edge cases
+- All raw outputs are inspectable via tabs.
+- Parsed rankings are shown below raw text for validation.
+- Aggregate rankings summarize peer consensus.
 
 ## Important Implementation Details
 
 ### Relative Imports
-All backend modules use relative imports (e.g., `from .config import ...`) not absolute imports. This is critical for Python's module system to work correctly when running as `python -m backend.main`.
+All backend modules use relative imports (e.g., `from .config import ...`) so `python -m backend.main` works from repo root.
 
 ### Port Configuration
-- Backend: 8001 (changed from 8000 to avoid conflict)
+- Backend: 8001
 - Frontend: 5173 (Vite default)
-- Update both `backend/main.py` and `frontend/src/api.js` if changing
+- Update both `backend/main.py` and `frontend/src/api.js` if changing.
 
 ### Markdown Rendering
-All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
+All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing (global styles in `index.css`).
 
 ### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+Defaults live in `backend/config.py`, but the UI can override council composition, chairman, and title model at runtime.
 
 ## Common Gotchas
 
-1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
-2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
-3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
-4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root.
+2. **CORS Issues**: Frontend must match allowed origins in `main.py`.
+3. **Ranking Parse Failures**: Fallback regex extracts any `Response X` patterns in order.
+4. **Missing Metadata**: `label_to_model` is ephemeral (not persisted), only in API responses.
+5. **Region Mismatch**: Selected region must support each model ID.
 
 ## Future Enhancement Ideas
 
-- Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
+- Configurable council/chairman via URL params or shareable presets
+- Streaming persistence (store stage updates in conversation history)
 - Export conversations to markdown/PDF
 - Model performance analytics over time
-- Custom ranking criteria (not just accuracy/insight)
-- Support for reasoning models (o1, etc.) with special handling
-
-## Testing Notes
-
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+- Custom ranking criteria (beyond accuracy/insight)
+- Support for reasoning‑only models with special handling
 
 ## Data Flow Summary
 
@@ -165,5 +158,3 @@ Return: {stage1, stage2, stage3, metadata}
     ↓
 Frontend: Display with tabs + validation UI
 ```
-
-The entire flow is async/parallel where possible to minimize latency.

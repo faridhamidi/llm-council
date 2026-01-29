@@ -10,6 +10,17 @@ In a bit more detail, here is what happens when you submit a query:
 2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
 3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
 
+## Features (Current)
+
+- **3-stage council flow**: parallel responses → anonymous peer ranking → chairman synthesis
+- **Streaming updates**: server-sent events (SSE) for stage-by-stage progress
+- **Cancelable requests**: stop in-flight streams from the UI
+- **Council Settings UI**: manage members, aliases, chairman, title model, and per-member system prompts
+- **Presets**: save/apply/delete council configurations
+- **Bedrock region switcher**: change region and list region-compatible Converse models
+- **Conversation storage**: JSON on disk with soft-delete + restore (trash)
+- **Readable UX**: tabbed Stage 1/2/3 views, parsed rankings, and aggregate ranking table
+
 ## Vibe Code Alert
 
 This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
@@ -46,7 +57,7 @@ Note: Bedrock inference profiles are source-region scoped. If a model's inferenc
 
 ### 3. Configure Models (Optional)
 
-Edit `backend/config.py` to customize the council:
+You can customize defaults in `backend/config.py`, but most users should do it from the UI (see below):
 
 ```python
 COUNCIL_MODELS = [
@@ -73,14 +84,18 @@ TITLE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 You can now manage council members, aliases, chairman, and title model from the UI:
 
 1. Click **Council Settings** in the sidebar.
-2. Add/remove members (max 7).
-3. Drag cards to reorder.
-4. Pick models from the Converse‑compatible list for the current region.
-5. Click **Save Settings** to apply instantly (no restart).
+2. Add/remove members (max 7) and drag to reorder.
+3. Pick models from the Converse‑compatible list for the current region.
+4. Set chairman + title model.
+5. Optional: add per‑member system prompts.
+6. Optional: disable system prompts in Stage 2 & 3.
+7. Save/apply/delete presets.
+8. Click **Save Settings** to apply instantly (no restart).
 
 Notes:
 - Region and API key updates are in‑memory and reset on backend restart.
 - If a model is not available in the selected region, it will be rejected.
+- Settings are persisted in `data/council_settings.json`. Presets are stored in `data/council_presets.json`.
 
 ## Running the Application
 
@@ -110,3 +125,11 @@ Then open http://localhost:5173 in your browser.
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript
+
+## API Highlights
+
+- `POST /api/conversations/{id}/message`: Non‑streaming 3‑stage response
+- `POST /api/conversations/{id}/message/stream`: SSE streaming (stage1/2/3 events)
+- `POST /api/conversations/{id}/message/cancel`: Cancel active stream
+- `POST /api/settings/council`: Update council settings
+- `GET /api/settings/bedrock-models`: Models available for current region
