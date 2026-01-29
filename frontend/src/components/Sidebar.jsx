@@ -22,6 +22,30 @@ export default function Sidebar({
   const [isCouncilSaving, setIsCouncilSaving] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState(null);
 
+  const coerceCouncilSettings = (settings, models) => {
+    if (!settings || !Array.isArray(models) || models.length === 0) return settings;
+    const allowedIds = new Set(models.map((model) => model.id));
+    const fallbackId = models[0].id;
+    const nextMembers = (settings.members || []).map((member) => {
+      const nextModelId = allowedIds.has(member.model_id) ? member.model_id : fallbackId;
+      if (nextModelId === member.model_id) return member;
+      return { ...member, model_id: nextModelId };
+    });
+    const memberIds = new Set(nextMembers.map((member) => member.id));
+    const nextChairmanId = memberIds.has(settings.chairman_id)
+      ? settings.chairman_id
+      : nextMembers[0]?.id || settings.chairman_id;
+    const nextTitleModelId = allowedIds.has(settings.title_model_id)
+      ? settings.title_model_id
+      : fallbackId;
+    return {
+      ...settings,
+      members: nextMembers,
+      chairman_id: nextChairmanId,
+      title_model_id: nextTitleModelId,
+    };
+  };
+
   useEffect(() => {
     let isMounted = true;
     const loadRegions = async () => {
@@ -78,8 +102,9 @@ export default function Sidebar({
         api.getCouncilSettings(),
         api.listBedrockModels(),
       ]);
-      setCouncilSettings(settingsResponse);
-      setCouncilModels(modelsResponse.models || []);
+      const models = modelsResponse.models || [];
+      setCouncilModels(models);
+      setCouncilSettings(coerceCouncilSettings(settingsResponse, models));
     } catch (error) {
       setCouncilError(error.message || 'Failed to load council settings.');
     }
@@ -113,6 +138,7 @@ export default function Sidebar({
         id: newId,
         alias: `Member ${prev.members.length + 1}`,
         model_id: defaultModel,
+        system_prompt: '',
       };
       return { ...prev, members: [...prev.members, newMember] };
     });
@@ -151,11 +177,15 @@ export default function Sidebar({
     setIsCouncilSaving(true);
     setCouncilError(null);
     try {
+      const nextSettings = coerceCouncilSettings(councilSettings, councilModels);
+      if (nextSettings !== councilSettings) {
+        setCouncilSettings(nextSettings);
+      }
       const payload = {
-        members: councilSettings.members,
-        chairman_id: councilSettings.chairman_id,
-        chairman_label: councilSettings.chairman_label || 'Chairman',
-        title_model_id: councilSettings.title_model_id,
+        members: nextSettings.members,
+        chairman_id: nextSettings.chairman_id,
+        chairman_label: nextSettings.chairman_label || 'Chairman',
+        title_model_id: nextSettings.title_model_id,
       };
       await api.updateCouncilSettings(payload);
       setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
@@ -176,9 +206,10 @@ export default function Sidebar({
       const response = await api.updateBedrockRegion(selectedRegion);
       setRegionStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
       if (response.settings && isCouncilModalOpen) {
-        setCouncilSettings(response.settings);
         const modelsResponse = await api.listBedrockModels();
-        setCouncilModels(modelsResponse.models || []);
+        const models = modelsResponse.models || [];
+        setCouncilModels(models);
+        setCouncilSettings(coerceCouncilSettings(response.settings, models));
       }
     } catch (error) {
       setRegionStatus({ type: 'error', message: error.message || 'Failed to update region.' });
@@ -372,6 +403,17 @@ export default function Sidebar({
                             </option>
                           ))}
                         </select>
+                      </label>
+                      <label>
+                        System prompt (optional)
+                        <textarea
+                          rows={3}
+                          value={member.system_prompt || ''}
+                          onChange={(event) =>
+                            updateMember(member.id, { system_prompt: event.target.value })
+                          }
+                          placeholder="Add role-specific guidance for this member..."
+                        />
                       </label>
                       <button
                         className={`chairman-btn ${councilSettings.chairman_id === member.id ? 'active' : ''}`}

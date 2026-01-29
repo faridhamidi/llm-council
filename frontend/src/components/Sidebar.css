@@ -322,6 +322,16 @@
   background: #ffffff;
 }
 
+.council-card textarea {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #ffffff;
+  resize: vertical;
+  min-height: 72px;
+}
+
 .chairman-btn {
   border: 1px solid #c7d6ea;
   background: #ffffff;

@@ -60,10 +60,14 @@ class UpdateBedrockRegionRequest(BaseModel):
     region: str
 
 
+MAX_SYSTEM_PROMPT_CHARS = 4000
+
+
 class CouncilMemberConfig(BaseModel):
     id: str
     alias: str
     model_id: str
+    system_prompt: str | None = ""
 
 
 class CouncilSettingsRequest(BaseModel):
@@ -257,6 +261,10 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
     for member in members:
         if member.model_id not in allowed_models:
             errors.append(f"Unsupported model for region: {member.model_id}")
+            break
+        prompt_value = member.system_prompt or ""
+        if len(prompt_value) > MAX_SYSTEM_PROMPT_CHARS:
+            errors.append(f"System prompt too long for {member.alias}.")
             break
 
     if payload.title_model_id not in allowed_models:

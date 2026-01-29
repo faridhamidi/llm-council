@@ -65,6 +65,16 @@
   font-family: monospace;
 }
 
+.system-prompt-warning {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 12px;
+}
+
 .response-text {
   color: #333;
   line-height: 1.6;

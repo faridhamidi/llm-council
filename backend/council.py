@@ -5,13 +5,21 @@ from .openrouter import query_models_parallel, query_model
 from .council_settings import get_settings
 
 
-def _council_config() -> Tuple[List[Dict[str, Any]], Dict[str, str], str, str, str]:
+def _council_config() -> Tuple[
+    List[Dict[str, Any]],
+    Dict[str, str],
+    str,
+    str,
+    str,
+    Dict[str, str],
+]:
     """
-    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id).
+    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map).
     """
     settings = get_settings()
     members = settings.get("members", [])
     alias_map = {member["model_id"]: member.get("alias", member["model_id"]) for member in members}
+    system_prompt_map = {member["model_id"]: member.get("system_prompt", "") for member in members}
 
     chairman_id = settings.get("chairman_id")
     chairman_label = settings.get("chairman_label", "Chairman")
@@ -26,7 +34,7 @@ def _council_config() -> Tuple[List[Dict[str, Any]], Dict[str, str], str, str, s
     if not chairman_model_id and members:
         chairman_model_id = members[0].get("model_id", "")
 
-    return members, alias_map, chairman_model_id, chairman_label, title_model_id
+    return members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -42,9 +50,9 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    members, alias_map, _, _, _ = _council_config()
+    members, alias_map, _, _, _, system_prompt_map = _council_config()
     models = [member["model_id"] for member in members]
-    responses = await query_models_parallel(models, messages)
+    responses = await query_models_parallel(models, messages, system_prompt_map)
 
     # Format results
     stage1_results = []
@@ -55,6 +63,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
                 "model": alias_map.get(model, model),
                 "response": content,
                 "status": "ok",
+                "system_prompt_dropped": bool(response.get("system_prompt_dropped")),
             })
         else:
             stage1_results.append({
@@ -62,6 +71,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
                 "response": "",
                 "status": "failed",
                 "error": (response or {}).get("error", "No response received."),
+                "system_prompt_dropped": bool((response or {}).get("system_prompt_dropped")),
             })
 
     return stage1_results
@@ -145,9 +155,9 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    members, alias_map, _, _, _ = _council_config()
+    members, alias_map, _, _, _, system_prompt_map = _council_config()
     models = [member["model_id"] for member in members]
-    responses = await query_models_parallel(models, messages)
+    responses = await query_models_parallel(models, messages, system_prompt_map)
 
     # Format results
     stage2_results = []
@@ -219,8 +229,12 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    _, _, chairman_model_id, chairman_label, _ = _council_config()
-    response = await query_model(chairman_model_id, messages)
+    _, _, chairman_model_id, chairman_label, _, system_prompt_map = _council_config()
+    response = await query_model(
+        chairman_model_id,
+        messages,
+        system_prompt=system_prompt_map.get(chairman_model_id, "")
+    )
 
     if response is None or not response.get("content"):
         # Fallback if chairman fails
@@ -336,7 +350,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    members, _, chairman_model_id, _, title_model_id = _council_config()
+    members, _, chairman_model_id, _, title_model_id, _ = _council_config()
     fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
     response = await query_model(title_model_id or fallback_model, messages, timeout=30.0)
 

@@ -28,6 +28,11 @@ export default function Stage1({ responses }) {
 
       <div className="tab-content">
         <div className="model-name">{responses[activeTab].model}</div>
+        {responses[activeTab].system_prompt_dropped && (
+          <div className="system-prompt-warning">
+            System prompt ignored by this model (continued without it).
+          </div>
+        )}
         {responses[activeTab].status === 'failed' ? (
           <div className="response-text markdown-content">
             <p><strong>Failed to respond.</strong></p>

@@ -41,6 +41,7 @@ def _default_settings() -> Dict[str, Any]:
                 "id": f"member-{index + 1}",
                 "alias": alias,
                 "model_id": model_id,
+                "system_prompt": "",
             }
         )
 
@@ -59,6 +60,17 @@ def _default_settings() -> Dict[str, Any]:
     }
 
 
+def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+    """Ensure new fields exist for older settings payloads."""
+    changed = False
+    members = settings.get("members", [])
+    for member in members:
+        if "system_prompt" not in member:
+            member["system_prompt"] = ""
+            changed = True
+    return settings, changed
+
+
 def load_settings() -> Dict[str, Any]:
     """Load settings from disk or create defaults."""
     _ensure_settings_dir()
@@ -69,7 +81,11 @@ def load_settings() -> Dict[str, Any]:
         return settings
 
     with open(path, "r") as file:
-        return json.load(file)
+        settings = json.load(file)
+    settings, changed = _upgrade_settings(settings)
+    if changed:
+        save_settings(settings)
+    return settings
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
