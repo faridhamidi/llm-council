@@ -21,6 +21,10 @@ export default function Sidebar({
   const [councilError, setCouncilError] = useState(null);
   const [isCouncilSaving, setIsCouncilSaving] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [councilPresets, setCouncilPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [presetNameInput, setPresetNameInput] = useState('');
+  const [presetStatus, setPresetStatus] = useState(null);
 
   const coerceCouncilSettings = (settings, models) => {
     if (!settings || !Array.isArray(models) || models.length === 0) return settings;
@@ -43,6 +47,8 @@ export default function Sidebar({
       members: nextMembers,
       chairman_id: nextChairmanId,
       title_model_id: nextTitleModelId,
+      use_system_prompt_stage2: settings.use_system_prompt_stage2 ?? true,
+      use_system_prompt_stage3: settings.use_system_prompt_stage3 ?? true,
     };
   };
 
@@ -96,15 +102,18 @@ export default function Sidebar({
 
   const openCouncilModal = async () => {
     setCouncilError(null);
+    setPresetStatus(null);
     setIsCouncilModalOpen(true);
     try {
-      const [settingsResponse, modelsResponse] = await Promise.all([
+      const [settingsResponse, modelsResponse, presetsResponse] = await Promise.all([
         api.getCouncilSettings(),
         api.listBedrockModels(),
+        api.listCouncilPresets(),
       ]);
       const models = modelsResponse.models || [];
       setCouncilModels(models);
       setCouncilSettings(coerceCouncilSettings(settingsResponse, models));
+      setCouncilPresets(presetsResponse.presets || []);
     } catch (error) {
       setCouncilError(error.message || 'Failed to load council settings.');
     }
@@ -113,6 +122,8 @@ export default function Sidebar({
   const closeCouncilModal = () => {
     setIsCouncilModalOpen(false);
     setDraggedIndex(null);
+    setPresetNameInput('');
+    setPresetStatus(null);
   };
 
   const updateMember = (memberId, updates) => {
@@ -186,6 +197,8 @@ export default function Sidebar({
         chairman_id: nextSettings.chairman_id,
         chairman_label: nextSettings.chairman_label || 'Chairman',
         title_model_id: nextSettings.title_model_id,
+        use_system_prompt_stage2: nextSettings.use_system_prompt_stage2 ?? true,
+        use_system_prompt_stage3: nextSettings.use_system_prompt_stage3 ?? true,
       };
       await api.updateCouncilSettings(payload);
       setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
@@ -213,6 +226,66 @@ export default function Sidebar({
       }
     } catch (error) {
       setRegionStatus({ type: 'error', message: error.message || 'Failed to update region.' });
+    }
+  };
+
+  const handleSavePreset = async () => {
+    if (!councilSettings) return;
+    const trimmedName = presetNameInput.trim();
+    if (!trimmedName) {
+      setPresetStatus({ type: 'error', message: 'Preset name is required.' });
+      return;
+    }
+    setPresetStatus(null);
+    try {
+      const nextSettings = coerceCouncilSettings(councilSettings, councilModels);
+      const response = await api.saveCouncilPreset(trimmedName, {
+        members: nextSettings.members,
+        chairman_id: nextSettings.chairman_id,
+        chairman_label: nextSettings.chairman_label || 'Chairman',
+        title_model_id: nextSettings.title_model_id,
+      });
+      setCouncilPresets(response.presets || []);
+      setPresetNameInput('');
+      setPresetStatus({
+        type: 'success',
+        message: response.updated ? 'Preset updated.' : 'Preset saved.',
+      });
+    } catch (error) {
+      setPresetStatus({ type: 'error', message: error.message || 'Failed to save preset.' });
+    }
+  };
+
+  const handleApplyPreset = async () => {
+    if (!selectedPresetId) {
+      setPresetStatus({ type: 'error', message: 'Select a preset to apply.' });
+      return;
+    }
+    setPresetStatus(null);
+    try {
+      const response = await api.applyCouncilPreset(selectedPresetId);
+      if (response.settings) {
+        setCouncilSettings(coerceCouncilSettings(response.settings, councilModels));
+      }
+      setPresetStatus({ type: 'success', message: 'Preset applied.' });
+    } catch (error) {
+      setPresetStatus({ type: 'error', message: error.message || 'Failed to apply preset.' });
+    }
+  };
+
+  const handleDeletePreset = async () => {
+    if (!selectedPresetId) {
+      setPresetStatus({ type: 'error', message: 'Select a preset to delete.' });
+      return;
+    }
+    setPresetStatus(null);
+    try {
+      const response = await api.deleteCouncilPreset(selectedPresetId);
+      setCouncilPresets(response.presets || []);
+      setSelectedPresetId('');
+      setPresetStatus({ type: 'success', message: 'Preset deleted.' });
+    } catch (error) {
+      setPresetStatus({ type: 'error', message: error.message || 'Failed to delete preset.' });
     }
   };
 
@@ -354,11 +427,75 @@ export default function Sidebar({
                 + Add member
               </button>
             </div>
+            {councilSettings && (
+              <div className="council-toggle-bar">
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={
+                      !(councilSettings.use_system_prompt_stage2 ?? true) &&
+                      !(councilSettings.use_system_prompt_stage3 ?? true)
+                    }
+                    onChange={(event) =>
+                      setCouncilSettings((prev) => ({
+                        ...prev,
+                        use_system_prompt_stage2: !event.target.checked,
+                        use_system_prompt_stage3: !event.target.checked,
+                      }))
+                    }
+                  />
+                  Disable system prompts in Stage 2 & 3
+                </label>
+              </div>
+            )}
             {councilError && <div className="token-status error">{councilError}</div>}
+            {presetStatus && (
+              <div className={`token-status ${presetStatus.type}`}>
+                {presetStatus.message}
+              </div>
+            )}
             {!councilSettings ? (
               <div className="token-status">Loading settings...</div>
             ) : (
               <>
+                <div className="council-presets">
+                  <div className="council-presets-row">
+                    <label>
+                      Save preset
+                      <input
+                        type="text"
+                        placeholder="Preset name"
+                        value={presetNameInput}
+                        onChange={(event) => setPresetNameInput(event.target.value)}
+                      />
+                    </label>
+                    <button className="preset-btn" onClick={handleSavePreset}>
+                      Save
+                    </button>
+                  </div>
+                  <div className="council-presets-row">
+                    <label>
+                      Apply preset
+                      <select
+                        value={selectedPresetId}
+                        onChange={(event) => setSelectedPresetId(event.target.value)}
+                      >
+                        <option value="">Select preset</option>
+                        {councilPresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className="preset-btn" onClick={handleApplyPreset}>
+                      Apply
+                    </button>
+                    <button className="preset-btn danger" onClick={handleDeletePreset}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
                 <div className="token-status hint">
                   Drag cards to reorder. Updates apply to new messages immediately after saving.
                 </div>

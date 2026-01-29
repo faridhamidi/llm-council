@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any
 import uuid
 import json
@@ -22,6 +22,12 @@ from .council_settings import (
     update_settings,
     MAX_COUNCIL_MEMBERS,
     normalize_settings_for_region,
+)
+from .council_presets import (
+    list_presets,
+    create_preset,
+    find_preset,
+    delete_preset,
 )
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
@@ -75,6 +81,17 @@ class CouncilSettingsRequest(BaseModel):
     chairman_id: str
     chairman_label: str | None = "Chairman"
     title_model_id: str
+    use_system_prompt_stage2: bool = True
+    use_system_prompt_stage3: bool = True
+
+
+class CouncilPresetRequest(BaseModel):
+    name: str
+    settings: CouncilSettingsRequest
+
+
+class CouncilPresetApplyRequest(BaseModel):
+    preset_id: str
 
 
 class ConversationMetadata(BaseModel):
@@ -233,6 +250,12 @@ async def get_council_settings():
     return get_settings()
 
 
+@app.get("/api/settings/council/presets")
+async def get_council_presets():
+    """Return available council presets."""
+    return {"presets": list_presets()}
+
+
 @app.get("/api/settings/bedrock-models")
 async def get_bedrock_models():
     """Return Converse-capable models for the current region."""
@@ -290,10 +313,58 @@ async def update_council_settings(request: CouncilSettingsRequest):
         "chairman_id": request.chairman_id,
         "chairman_label": request.chairman_label or "Chairman",
         "title_model_id": request.title_model_id,
+        "use_system_prompt_stage2": request.use_system_prompt_stage2,
+        "use_system_prompt_stage3": request.use_system_prompt_stage3,
     }
 
     update_settings(settings)
     return {"status": "ok", "settings": settings}
+
+
+@app.post("/api/settings/council/presets")
+async def create_council_preset(request: CouncilPresetRequest):
+    """Create a new council preset."""
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail={"errors": ["Preset name is required."]})
+    errors = _validate_council_settings(request.settings)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    preset = create_preset(name, request.settings.model_dump())
+    was_updated = "updated_at" in preset
+    return {"status": "ok", "preset": preset, "presets": list_presets(), "updated": was_updated}
+
+
+@app.post("/api/settings/council/presets/apply")
+async def apply_council_preset(request: CouncilPresetApplyRequest):
+    """Apply a preset to the current council settings."""
+    preset = find_preset(request.preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+    region = get_bedrock_region()
+    settings = normalize_settings_for_region(preset.get("settings", {}), region)
+
+    try:
+        payload = CouncilSettingsRequest.model_validate(settings)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail={"errors": [str(exc)]}) from exc
+
+    errors = _validate_council_settings(payload)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    update_settings(settings)
+    return {"status": "ok", "settings": settings, "preset": {"id": preset["id"], "name": preset["name"]}}
+
+
+@app.delete("/api/settings/council/presets/{preset_id}")
+async def delete_council_preset(preset_id: str):
+    """Delete a council preset."""
+    deleted = delete_preset(preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return {"status": "ok", "presets": list_presets()}
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")

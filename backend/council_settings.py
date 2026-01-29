@@ -57,6 +57,8 @@ def _default_settings() -> Dict[str, Any]:
         "chairman_id": chairman_id,
         "chairman_label": CHAIRMAN_ALIAS,
         "title_model_id": TITLE_MODEL,
+        "use_system_prompt_stage2": True,
+        "use_system_prompt_stage3": True,
     }
 
 
@@ -68,6 +70,12 @@ def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
         if "system_prompt" not in member:
             member["system_prompt"] = ""
             changed = True
+    if "use_system_prompt_stage2" not in settings:
+        settings["use_system_prompt_stage2"] = True
+        changed = True
+    if "use_system_prompt_stage3" not in settings:
+        settings["use_system_prompt_stage3"] = True
+        changed = True
     return settings, changed
 
 

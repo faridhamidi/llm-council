@@ -237,6 +237,67 @@ export const api = {
   },
 
   /**
+   * List council presets.
+   */
+  async listCouncilPresets() {
+    const response = await fetch(`${API_BASE}/api/settings/council/presets`);
+    if (!response.ok) {
+      throw new Error('Failed to load council presets');
+    }
+    return response.json();
+  },
+
+  /**
+   * Save a council preset.
+   */
+  async saveCouncilPreset(name, settings) {
+    const response = await fetch(`${API_BASE}/api/settings/council/presets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name, settings }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save council preset');
+    }
+    return response.json();
+  },
+
+  /**
+   * Apply a council preset.
+   */
+  async applyCouncilPreset(presetId) {
+    const response = await fetch(`${API_BASE}/api/settings/council/presets/apply`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ preset_id: presetId }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to apply council preset');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a council preset.
+   */
+  async deleteCouncilPreset(presetId) {
+    const response = await fetch(`${API_BASE}/api/settings/council/presets/${presetId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to delete council preset');
+    }
+    return response.json();
+  },
+
+  /**
    * List Bedrock Converse-capable models for the current region.
    */
   async listBedrockModels() {

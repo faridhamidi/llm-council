@@ -12,14 +12,19 @@ def _council_config() -> Tuple[
     str,
     str,
     Dict[str, str],
+    bool,
+    bool,
 ]:
     """
-    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map).
+    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map,
+    use_system_prompt_stage2, use_system_prompt_stage3).
     """
     settings = get_settings()
     members = settings.get("members", [])
     alias_map = {member["model_id"]: member.get("alias", member["model_id"]) for member in members}
     system_prompt_map = {member["model_id"]: member.get("system_prompt", "") for member in members}
+    use_system_prompt_stage2 = settings.get("use_system_prompt_stage2", True)
+    use_system_prompt_stage3 = settings.get("use_system_prompt_stage3", True)
 
     chairman_id = settings.get("chairman_id")
     chairman_label = settings.get("chairman_label", "Chairman")
@@ -34,7 +39,16 @@ def _council_config() -> Tuple[
     if not chairman_model_id and members:
         chairman_model_id = members[0].get("model_id", "")
 
-    return members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map
+    return (
+        members,
+        alias_map,
+        chairman_model_id,
+        chairman_label,
+        title_model_id,
+        system_prompt_map,
+        use_system_prompt_stage2,
+        use_system_prompt_stage3,
+    )
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -50,7 +64,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    members, alias_map, _, _, _, system_prompt_map = _council_config()
+    members, alias_map, _, _, _, system_prompt_map, _, _ = _council_config()
     models = [member["model_id"] for member in members]
     responses = await query_models_parallel(models, messages, system_prompt_map)
 
@@ -155,9 +169,13 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    members, alias_map, _, _, _, system_prompt_map = _council_config()
+    members, alias_map, _, _, _, system_prompt_map, use_stage2_prompt, _ = _council_config()
     models = [member["model_id"] for member in members]
-    responses = await query_models_parallel(models, messages, system_prompt_map)
+    responses = await query_models_parallel(
+        models,
+        messages,
+        system_prompt_map if use_stage2_prompt else None
+    )
 
     # Format results
     stage2_results = []
@@ -229,11 +247,11 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    _, _, chairman_model_id, chairman_label, _, system_prompt_map = _council_config()
+    _, _, chairman_model_id, chairman_label, _, system_prompt_map, _, use_stage3_prompt = _council_config()
     response = await query_model(
         chairman_model_id,
         messages,
-        system_prompt=system_prompt_map.get(chairman_model_id, "")
+        system_prompt=system_prompt_map.get(chairman_model_id, "") if use_stage3_prompt else None
     )
 
     if response is None or not response.get("content"):
@@ -350,7 +368,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    members, _, chairman_model_id, _, title_model_id, _ = _council_config()
+    members, _, chairman_model_id, _, title_model_id, _, _, _ = _council_config()
     fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
     response = await query_model(title_model_id or fallback_model, messages, timeout=30.0)
 
