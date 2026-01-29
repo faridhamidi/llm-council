@@ -446,6 +446,21 @@ export default function Sidebar({
                   />
                   Disable system prompts in Stage 2 & 3
                 </label>
+                <label className="title-model inline">
+                  Title model
+                  <select
+                    value={councilSettings.title_model_id}
+                    onChange={(event) =>
+                      setCouncilSettings((prev) => ({ ...prev, title_model_id: event.target.value }))
+                    }
+                  >
+                    {councilModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label} ({model.id})
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             )}
             {councilError && <div className="token-status error">{councilError}</div>}
@@ -564,21 +579,6 @@ export default function Sidebar({
                   ))}
                 </div>
                 <div className="council-footer">
-                  <label className="title-model">
-                    Title model
-                    <select
-                      value={councilSettings.title_model_id}
-                      onChange={(event) =>
-                        setCouncilSettings((prev) => ({ ...prev, title_model_id: event.target.value }))
-                      }
-                    >
-                      {councilModels.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.label} ({model.id})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <div className="token-modal-actions">
                     <button type="button" className="token-cancel-btn" onClick={closeCouncilModal}>
                       Cancel

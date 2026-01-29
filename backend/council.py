@@ -1,7 +1,8 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
+import asyncio
+from .openrouter import query_model
 from .council_settings import get_settings
 
 
@@ -11,18 +12,16 @@ def _council_config() -> Tuple[
     str,
     str,
     str,
-    Dict[str, str],
     bool,
     bool,
 ]:
     """
-    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id, system_prompt_map,
+    Returns (members, alias_map, chairman_model_id, chairman_label, title_model_id,
     use_system_prompt_stage2, use_system_prompt_stage3).
     """
     settings = get_settings()
     members = settings.get("members", [])
     alias_map = {member["model_id"]: member.get("alias", member["model_id"]) for member in members}
-    system_prompt_map = {member["model_id"]: member.get("system_prompt", "") for member in members}
     use_system_prompt_stage2 = settings.get("use_system_prompt_stage2", True)
     use_system_prompt_stage3 = settings.get("use_system_prompt_stage3", True)
 
@@ -45,7 +44,6 @@ def _council_config() -> Tuple[
         chairman_model_id,
         chairman_label,
         title_model_id,
-        system_prompt_map,
         use_system_prompt_stage2,
         use_system_prompt_stage3,
     )
@@ -64,24 +62,32 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    members, alias_map, _, _, _, system_prompt_map, _, _ = _council_config()
-    models = [member["model_id"] for member in members]
-    responses = await query_models_parallel(models, messages, system_prompt_map)
+    members, _, _, _, _, _, _ = _council_config()
+    tasks = [
+        query_model(
+            member["model_id"],
+            messages,
+            system_prompt=member.get("system_prompt", ""),
+        )
+        for member in members
+    ]
+    responses = await asyncio.gather(*tasks)
 
     # Format results
     stage1_results = []
-    for model, response in responses.items():
+    for member, response in zip(members, responses):
+        model_id = member.get("model_id", "")
         content = response.get("content") if response else None
         if content:
             stage1_results.append({
-                "model": alias_map.get(model, model),
+                "model": member.get("alias", model_id),
                 "response": content,
                 "status": "ok",
                 "system_prompt_dropped": bool(response.get("system_prompt_dropped")),
             })
         else:
             stage1_results.append({
-                "model": alias_map.get(model, model),
+                "model": member.get("alias", model_id),
                 "response": "",
                 "status": "failed",
                 "error": (response or {}).get("error", "No response received."),
@@ -169,22 +175,25 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    members, alias_map, _, _, _, system_prompt_map, use_stage2_prompt, _ = _council_config()
-    models = [member["model_id"] for member in members]
-    responses = await query_models_parallel(
-        models,
-        messages,
-        system_prompt_map if use_stage2_prompt else None
-    )
+    members, _, _, _, _, use_stage2_prompt, _ = _council_config()
+    tasks = [
+        query_model(
+            member["model_id"],
+            messages,
+            system_prompt=member.get("system_prompt", "") if use_stage2_prompt else None,
+        )
+        for member in members
+    ]
+    responses = await asyncio.gather(*tasks)
 
     # Format results
     stage2_results = []
-    for model, response in responses.items():
+    for member, response in zip(members, responses):
         if response is not None and response.get('content'):
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
-                "model": alias_map.get(model, model),
+                "model": member.get("alias", member.get("model_id", "")),
                 "ranking": full_text,
                 "parsed_ranking": parsed
             })
@@ -247,11 +256,16 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    _, _, chairman_model_id, chairman_label, _, system_prompt_map, _, use_stage3_prompt = _council_config()
+    members, _, chairman_model_id, chairman_label, _, _, use_stage3_prompt = _council_config()
+    chairman_prompt_text = ""
+    for member in members:
+        if member.get("model_id") == chairman_model_id:
+            chairman_prompt_text = member.get("system_prompt", "")
+            break
     response = await query_model(
         chairman_model_id,
         messages,
-        system_prompt=system_prompt_map.get(chairman_model_id, "") if use_stage3_prompt else None
+        system_prompt=chairman_prompt_text if use_stage3_prompt else None
     )
 
     if response is None or not response.get("content"):
@@ -368,7 +382,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    members, _, chairman_model_id, _, title_model_id, _, _, _ = _council_config()
+    members, _, chairman_model_id, _, title_model_id, _, _ = _council_config()
     fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
     response = await query_model(title_model_id or fallback_model, messages, timeout=30.0)
 
