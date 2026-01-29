@@ -73,6 +73,30 @@ export default function Sidebar({
     };
   }, []);
 
+  useEffect(() => {
+    const isAnyModalOpen = isTokenModalOpen || isCouncilModalOpen;
+    if (!isAnyModalOpen) return;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        if (isCouncilModalOpen) {
+          closeCouncilModal();
+        } else {
+          closeTokenModal();
+        }
+      }
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isTokenModalOpen, isCouncilModalOpen]);
+
   const openTokenModal = () => {
     setTokenStatus(null);
     setTokenInput('');
@@ -291,37 +315,43 @@ export default function Sidebar({
 
   return (
     <div className="sidebar">
-      <div className="sidebar-header">
-        <h1>LLM Council</h1>
-        <button className="new-conversation-btn" onClick={onNewConversation}>
-          + New Conversation
-        </button>
-        <button className="token-refresh-btn" onClick={openTokenModal}>
-          Refresh Bedrock Token
-        </button>
-        <button className="token-refresh-btn" onClick={openCouncilModal}>
-          Council Settings
-        </button>
-        <div className="region-selector">
-          <label htmlFor="bedrock-region-select">Bedrock Region</label>
-          <div className="region-row">
-            <select
-              id="bedrock-region-select"
-              value={selectedRegion}
-              onChange={(event) => setSelectedRegion(event.target.value)}
-            >
-              <option value="">Select region</option>
-              {regionOptions.map((region) => (
-                <option key={region.code} value={region.code}>
-                  {region.label} ({region.code})
-                </option>
-              ))}
-            </select>
-            <button className="region-apply-btn" onClick={handleRegionUpdate}>
-              Update
-            </button>
-          </div>
+      <div className="logo-section">
+        <div className="logo">
+          <span className="logo-icon">⚡</span>
+          <span>LLM Council</span>
         </div>
+        <div className="subtitle">Collaborative AI</div>
+      </div>
+
+      <div className="sidebar-actions">
+        <button className="action-btn primary" onClick={onNewConversation}>
+          <span>+ New Conversation</span>
+        </button>
+        <button className="action-btn" onClick={openTokenModal}>
+          <span>Refresh Bedrock Token</span>
+        </button>
+        <button className="action-btn" onClick={openCouncilModal}>
+          <span>Council Settings</span>
+        </button>
+      </div>
+
+      <div className="bedrock-section">
+        <label htmlFor="bedrock-region-select">Bedrock Region</label>
+        <select
+          id="bedrock-region-select"
+          value={selectedRegion}
+          onChange={(event) => setSelectedRegion(event.target.value)}
+        >
+          <option value="">Select region</option>
+          {regionOptions.map((region) => (
+            <option key={region.code} value={region.code}>
+              {region.label} ({region.code})
+            </option>
+          ))}
+        </select>
+        <button className="action-btn bedrock-update" onClick={handleRegionUpdate}>
+          <span>Update</span>
+        </button>
         {regionStatus && (
           <div className={`token-status ${regionStatus.type}`}>
             {regionStatus.message}
@@ -333,6 +363,8 @@ export default function Sidebar({
           </div>
         )}
       </div>
+
+      <div className="conversations-header">Recent Sessions</div>
 
       <div className="conversation-list">
         {conversations.length === 0 ? (
@@ -407,145 +439,140 @@ export default function Sidebar({
       {isCouncilModalOpen && (
         <div className="token-modal-backdrop" onClick={closeCouncilModal}>
           <div className="token-modal council-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="token-modal-header">
-              <h3>Council Members</h3>
-              <button className="token-modal-close" onClick={closeCouncilModal}>
+            <div className="token-modal-header modal-header">
+              <div>
+                <div className="modal-title">Council Members</div>
+                {councilSettings && (
+                  <div className="modal-meta">
+                    {councilSettings.members.length} / {councilSettings.max_members || 7} members configured
+                  </div>
+                )}
+              </div>
+              <button className="token-modal-close close-btn" onClick={closeCouncilModal}>
                 ×
               </button>
             </div>
-            <div className="council-meta">
+            <div className="council-modal-body">
               {councilSettings && (
-                <span>
-                  {councilSettings.members.length} / {councilSettings.max_members || 7} members
-                </span>
-              )}
-              <button
-                className="region-apply-btn"
-                onClick={handleAddMember}
-                disabled={!councilSettings || councilSettings.members.length >= (councilSettings.max_members || 7)}
-              >
-                + Add member
-              </button>
-            </div>
-            {councilSettings && (
-              <div className="council-toggle-bar">
-                <label className="toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={
-                      !(councilSettings.use_system_prompt_stage2 ?? true) &&
-                      !(councilSettings.use_system_prompt_stage3 ?? true)
-                    }
-                    onChange={(event) =>
-                      setCouncilSettings((prev) => ({
-                        ...prev,
-                        use_system_prompt_stage2: !event.target.checked,
-                        use_system_prompt_stage3: !event.target.checked,
-                      }))
-                    }
-                  />
-                  Disable system prompts in Stage 2 & 3
-                </label>
-                <label className="title-model inline">
-                  Title model
-                  <select
-                    value={councilSettings.title_model_id}
-                    onChange={(event) =>
-                      setCouncilSettings((prev) => ({ ...prev, title_model_id: event.target.value }))
-                    }
-                  >
-                    {councilModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label} ({model.id})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-            {councilError && <div className="token-status error">{councilError}</div>}
-            {presetStatus && (
-              <div className={`token-status ${presetStatus.type}`}>
-                {presetStatus.message}
-              </div>
-            )}
-            {!councilSettings ? (
-              <div className="token-status">Loading settings...</div>
-            ) : (
-              <>
-                <div className="council-presets">
-                  <div className="council-presets-row">
-                    <label>
-                      Save preset
+                <div className="modal-controls">
+                  <div className="control-row">
+                    <span className="control-label">Title Model</span>
+                    <select
+                      className="control-input"
+                      value={councilSettings.title_model_id}
+                      onChange={(event) =>
+                        setCouncilSettings((prev) => ({ ...prev, title_model_id: event.target.value }))
+                      }
+                    >
+                      {councilModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label} ({model.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="checkbox-container">
+                    <label className="checkbox-label">
                       <input
-                        type="text"
-                        placeholder="Preset name"
-                        value={presetNameInput}
-                        onChange={(event) => setPresetNameInput(event.target.value)}
+                        type="checkbox"
+                        checked={
+                          !(councilSettings.use_system_prompt_stage2 ?? true) &&
+                          !(councilSettings.use_system_prompt_stage3 ?? true)
+                        }
+                        onChange={(event) =>
+                          setCouncilSettings((prev) => ({
+                            ...prev,
+                            use_system_prompt_stage2: !event.target.checked,
+                            use_system_prompt_stage3: !event.target.checked,
+                          }))
+                        }
                       />
+                      Disable system prompts in Stage 2 & 3
                     </label>
-                    <button className="preset-btn" onClick={handleSavePreset}>
+                  </div>
+                  <div className="control-row">
+                    <span className="control-label">Save Preset</span>
+                    <input
+                      className="control-input"
+                      type="text"
+                      placeholder="Enter preset name"
+                      value={presetNameInput}
+                      onChange={(event) => setPresetNameInput(event.target.value)}
+                    />
+                    <button className="small-btn" onClick={handleSavePreset}>
                       Save
                     </button>
                   </div>
-                  <div className="council-presets-row">
-                    <label>
-                      Apply preset
-                      <select
-                        value={selectedPresetId}
-                        onChange={(event) => setSelectedPresetId(event.target.value)}
-                      >
-                        <option value="">Select preset</option>
-                        {councilPresets.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {preset.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button className="preset-btn" onClick={handleApplyPreset}>
-                      Apply
-                    </button>
-                    <button className="preset-btn danger" onClick={handleDeletePreset}>
-                      Delete
-                    </button>
+                  <div className="control-row">
+                    <span className="control-label">Apply Preset</span>
+                    <select
+                      className="control-input"
+                      value={selectedPresetId}
+                      onChange={(event) => setSelectedPresetId(event.target.value)}
+                    >
+                      <option value="">Select preset</option>
+                      {councilPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="button-group">
+                      <button className="small-btn" onClick={handleApplyPreset}>
+                        Apply
+                      </button>
+                      <button className="small-btn delete" onClick={handleDeletePreset}>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="token-status hint">
-                  Drag cards to reorder. Updates apply to new messages immediately after saving.
+              )}
+              {councilError && <div className="token-status error">{councilError}</div>}
+              {presetStatus && (
+                <div className={`token-status ${presetStatus.type}`}>
+                  {presetStatus.message}
                 </div>
-                <div className="council-grid">
-                  {councilSettings.members.map((member, index) => (
-                    <div
-                      key={member.id}
-                      className="council-card"
-                      draggable
-                      onDragStart={() => handleDragStart(index)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => handleDrop(index)}
-                    >
-                      <div className="council-card-header">
-                        <span className="drag-handle">⋮⋮</span>
-                        <span className="council-card-title">Member {index + 1}</span>
-                        <button
-                          className="conversation-delete-btn"
-                          onClick={() => handleRemoveMember(member.id)}
-                          title="Remove member"
-                        >
-                          ×
-                        </button>
-                      </div>
-                      <label>
-                        Alias
-                        <input
-                          type="text"
-                          value={member.alias}
-                          onChange={(event) => updateMember(member.id, { alias: event.target.value })}
-                        />
-                      </label>
-                      <label>
-                        Model
+              )}
+              {!councilSettings ? (
+                <div className="token-status">Loading settings...</div>
+              ) : (
+                <>
+                  <div className="info-text">
+                    → Drag cards to reorder. Updates apply to new messages immediately after saving.
+                  </div>
+                  <div className="members-grid">
+                    {councilSettings.members.map((member, index) => (
+                      <div
+                        key={member.id}
+                        className="member-card"
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => handleDrop(index)}
+                      >
+                        <div className="member-header">
+                          <div className="member-number">Member #{index + 1}</div>
+                          <button
+                            className="remove-btn"
+                            onClick={() => handleRemoveMember(member.id)}
+                            title="Remove member"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div className="member-alias-section">
+                          <span className="member-label">Alias</span>
+                          <input
+                            type="text"
+                            className="member-alias"
+                            value={member.alias}
+                            onChange={(event) => updateMember(member.id, { alias: event.target.value })}
+                          />
+                        </div>
+                        <span className="member-label">Model</span>
                         <select
+                          className="member-model"
                           value={member.model_id}
                           onChange={(event) => updateMember(member.id, { model_id: event.target.value })}
                         >
@@ -555,10 +582,9 @@ export default function Sidebar({
                             </option>
                           ))}
                         </select>
-                      </label>
-                      <label>
-                        System prompt (optional)
+                        <span className="member-label">System Prompt (optional)</span>
                         <textarea
+                          className="member-prompt"
                           rows={3}
                           value={member.system_prompt || ''}
                           onChange={(event) =>
@@ -566,35 +592,44 @@ export default function Sidebar({
                           }
                           placeholder="Add role-specific guidance for this member..."
                         />
-                      </label>
-                      <button
-                        className={`chairman-btn ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
-                        onClick={() =>
-                          setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
-                        }
-                      >
-                        {councilSettings.chairman_id === member.id ? 'Chairman' : 'Set Chairman'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="council-footer">
-                  <div className="token-modal-actions">
-                    <button type="button" className="token-cancel-btn" onClick={closeCouncilModal}>
-                      Cancel
-                    </button>
+                        <button
+                          className={`chairman-btn ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
+                          onClick={() =>
+                            setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
+                          }
+                        >
+                          {councilSettings.chairman_id === member.id ? 'Chairman' : 'Set as Chairman'}
+                        </button>
+                      </div>
+                    ))}
                     <button
                       type="button"
-                      className="token-save-btn"
-                      onClick={handleSaveCouncil}
-                      disabled={isCouncilSaving}
+                      className="member-card add-member-card"
+                      onClick={handleAddMember}
+                      disabled={councilSettings.members.length >= (councilSettings.max_members || 7)}
                     >
-                      {isCouncilSaving ? 'Saving...' : 'Save Settings'}
+                      <div className="add-icon">+</div>
+                      <div className="add-text">Add Member</div>
                     </button>
                   </div>
-                </div>
-              </>
-            )}
+                  <div className="council-footer">
+                    <div className="token-modal-actions">
+                      <button type="button" className="token-cancel-btn" onClick={closeCouncilModal}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="token-save-btn"
+                        onClick={handleSaveCouncil}
+                        disabled={isCouncilSaving}
+                      >
+                        {isCouncilSaving ? 'Saving...' : 'Save Settings'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

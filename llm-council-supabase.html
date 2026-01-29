@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Council - Collaborative AI Discussions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #121212;
+            --bg-tertiary: #1a1a1a;
+            --bg-hover: #1f1f1f;
+            --border-primary: #282828;
+            --border-secondary: #1f1f1f;
+            --text-primary: #ededed;
+            --text-secondary: #a0a0a0;
+            --text-tertiary: #6b6b6b;
+            --accent-green: #3ecf8e;
+            --accent-green-dark: #2d9e6b;
+            --accent-green-light: #4fffb0;
+            --accent-emerald: #10b981;
+            --accent-teal: #14b8a6;
+            --accent-yellow: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --glow: rgba(62, 207, 142, 0.15);
+            --glow-strong: rgba(62, 207, 142, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        /* Geometric background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(to right, var(--border-primary) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--border-primary) 1px, transparent 1px);
+            background-size: 40px 40px;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Radial gradient glow */
+        body::after {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 30% 20%, var(--glow) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            height: 100vh;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-primary);
+            padding: 24px 16px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .logo-section {
+            padding: 8px 12px;
+            margin-bottom: 24px;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-icon {
+            width: 28px;
+            height: 28px;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--bg-primary);
+        }
+
+        .subtitle {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 10px 16px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .action-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .action-btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .action-btn:hover {
+            border-color: var(--accent-green);
+            background: var(--bg-hover);
+        }
+
+        .action-btn.primary {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            color: var(--bg-primary);
+            font-weight: 600;
+        }
+
+        .action-btn.primary:hover {
+            background: var(--accent-green-light);
+            border-color: var(--accent-green-light);
+            box-shadow: 0 0 20px var(--glow);
+        }
+
+        .bedrock-section {
+            margin: 20px 0;
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+        }
+
+        .bedrock-section label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .bedrock-section select {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .bedrock-section select:hover {
+            border-color: var(--accent-green);
+        }
+
+        .bedrock-section select:focus {
+            outline: none;
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .conversations-header {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-tertiary);
+            margin: 24px 12px 12px 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-primary);
+        }
+
+        .conversation-item {
+            padding: 10px 12px;
+            margin-bottom: 4px;
+            background: transparent;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .conversation-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 0;
+            background: var(--accent-green);
+            border-radius: 0 2px 2px 0;
+            transition: height 0.2s ease;
+        }
+
+        .conversation-item:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--border-primary);
+        }
+
+        .conversation-item:hover::before {
+            height: 60%;
+        }
+
+        .conversation-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 2px;
+            color: var(--text-primary);
+        }
+
+        .conversation-meta {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-family: 'Source Code Pro', monospace;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: var(--bg-primary);
+        }
+
+        .welcome-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 48px;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .welcome-icon {
+            width: 120px;
+            height: 120px;
+            margin-bottom: 32px;
+            position: relative;
+        }
+
+        .hexagon {
+            width: 120px;
+            height: 120px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .hexagon::before,
+        .hexagon::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+            opacity: 0.1;
+            clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%);
+            animation: rotate 20s linear infinite;
+        }
+
+        .hexagon::after {
+            animation-delay: -10s;
+            opacity: 0.15;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .welcome-icon svg {
+            width: 50px;
+            height: 50px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            stroke: var(--accent-green);
+            stroke-width: 2;
+            fill: none;
+            filter: drop-shadow(0 0 10px var(--glow));
+        }
+
+        .welcome-screen h1 {
+            font-size: 42px;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+            font-weight: 700;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome-screen p {
+            font-size: 15px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            font-weight: 400;
+        }
+
+        .welcome-cta {
+            padding: 12px 28px;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .welcome-cta:hover {
+            background: var(--accent-green-light);
+            box-shadow: 0 0 30px var(--glow);
+            transform: translateY(-2px);
+        }
+
+        /* Modal Overlay */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            width: 90%;
+            max-width: 1300px;
+            max-height: 90vh;
+            overflow: hidden;
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(40px) scale(0.95); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
+        .modal-header {
+            padding: 24px 32px;
+            border-bottom: 1px solid var(--border-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-tertiary);
+        }
+
+        .modal-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+        }
+
+        .modal-meta {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            font-family: 'Source Code Pro', monospace;
+            margin-top: 4px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            border-radius: 6px;
+        }
+
+        .close-btn:hover {
+            color: var(--accent-red);
+            background: var(--bg-hover);
+        }
+
+        .modal-body {
+            padding: 32px;
+            overflow-y: auto;
+            max-height: calc(90vh - 100px);
+        }
+
+        .modal-controls {
+            margin-bottom: 32px;
+            padding: 20px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+        }
+
+        .control-row {
+            display: grid;
+            grid-template-columns: 140px 1fr auto;
+            gap: 12px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        .control-input {
+            padding: 10px 14px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .control-input:hover {
+            border-color: var(--accent-green);
+        }
+
+        .control-input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            grid-column: 1 / -1;
+            padding: 12px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            border: 1px solid var(--border-primary);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+
+        .checkbox-label input {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent-green);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .small-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .small-btn:hover {
+            border-color: var(--accent-green);
+            background: var(--bg-tertiary);
+        }
+
+        .small-btn.delete {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .small-btn.delete:hover {
+            background: var(--accent-red);
+            color: var(--text-primary);
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-bottom: 20px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent-green);
+            border-radius: 4px;
+            font-family: 'Source Code Pro', monospace;
+        }
+
+        /* Council Members Grid */
+        .members-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 20px;
+        }
+
+        .member-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            padding: 20px;
+            position: relative;
+            transition: all 0.2s ease;
+            animation: fadeIn 0.4s ease-out backwards;
+        }
+
+        .member-card:nth-child(1) { animation-delay: 0.05s; }
+        .member-card:nth-child(2) { animation-delay: 0.1s; }
+        .member-card:nth-child(3) { animation-delay: 0.15s; }
+        .member-card:nth-child(4) { animation-delay: 0.2s; }
+        .member-card:nth-child(5) { animation-delay: 0.25s; }
+        .member-card:nth-child(6) { animation-delay: 0.3s; }
+        .member-card:nth-child(7) { animation-delay: 0.35s; }
+
+        .member-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-teal));
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .member-card:hover {
+            border-color: var(--accent-green);
+            box-shadow: 0 8px 32px rgba(62, 207, 142, 0.1);
+        }
+
+        .member-card:hover::before {
+            opacity: 1;
+        }
+
+        .member-card.white::before { background: #f0f0f0; }
+        .member-card.red::before { background: var(--accent-red); }
+        .member-card.black::before { background: #1a1a1a; }
+        .member-card.yellow::before { background: var(--accent-yellow); }
+        .member-card.green::before { background: var(--accent-emerald); }
+        .member-card.blue::before { background: var(--accent-blue); }
+
+        .member-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .member-number {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: 'Source Code Pro', monospace;
+        }
+
+        .remove-btn {
+            background: var(--bg-hover);
+            border: 1px solid var(--border-primary);
+            font-size: 16px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+        }
+
+        .remove-btn:hover {
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .member-alias-section {
+            margin-bottom: 16px;
+        }
+
+        .member-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .member-alias {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border: 1px solid transparent;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            width: 100%;
+            transition: all 0.2s ease;
+            font-family: 'Source Code Pro', monospace;
+            letter-spacing: 2px;
+        }
+
+        .member-alias:hover {
+            border-color: var(--border-primary);
+        }
+
+        .member-alias:focus {
+            outline: none;
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .member-model,
+        .member-role {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .member-model:hover,
+        .member-role:hover {
+            border-color: var(--accent-green);
+        }
+
+        .member-model:focus,
+        .member-role:focus {
+            outline: none;
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .member-prompt {
+            width: 100%;
+            min-height: 90px;
+            padding: 12px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Source Code Pro', monospace;
+            font-size: 12px;
+            resize: vertical;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            line-height: 1.5;
+        }
+
+        .member-prompt:hover {
+            border-color: var(--accent-green);
+        }
+
+        .member-prompt:focus {
+            outline: none;
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .chairman-btn {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-primary);
+            background: var(--bg-hover);
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chairman-btn:hover {
+            border-color: var(--accent-green);
+            color: var(--text-primary);
+        }
+
+        .chairman-btn.active {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            border-color: var(--accent-green);
+            box-shadow: 0 0 20px var(--glow);
+        }
+
+        .chairman-btn.active::before {
+            content: '✓ ';
+        }
+
+        .add-member-card {
+            border: 1px dashed var(--border-primary);
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-height: 300px;
+        }
+
+        .add-member-card:hover {
+            border-color: var(--accent-green);
+            background: var(--bg-tertiary);
+            box-shadow: 0 0 20px var(--glow);
+        }
+
+        .add-icon {
+            font-size: 48px;
+            color: var(--text-tertiary);
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+
+        .add-member-card:hover .add-icon {
+            color: var(--accent-green);
+            transform: rotate(90deg);
+        }
+
+        .add-text {
+            font-size: 13px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+        }
+
+        .add-member-card:hover .add-text {
+            color: var(--accent-green);
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-primary);
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-green);
+        }
+
+        /* Code highlight */
+        code {
+            font-family: 'Source Code Pro', monospace;
+            background: var(--bg-primary);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-section">
+                <div class="logo">
+                    <div class="logo-icon">⚡</div>
+                    <span>LLM Council</span>
+                </div>
+                <div class="subtitle">Collaborative AI</div>
+            </div>
+            
+            <button class="action-btn primary" onclick="openModal()">
+                <span>+ New Conversation</span>
+            </button>
+            <button class="action-btn">
+                <span>Refresh Token</span>
+            </button>
+            <button class="action-btn" onclick="openModal()">
+                <span>Council Settings</span>
+            </button>
+
+            <div class="bedrock-section">
+                <label>Bedrock Region</label>
+                <select>
+                    <option>US East (Ohio) us-east-2</option>
+                    <option>US West (Oregon)</option>
+                    <option>EU (Ireland)</option>
+                    <option>Asia Pacific (Tokyo)</option>
+                </select>
+                <button class="action-btn" style="margin-top: 12px; margin-bottom: 0;">
+                    <span>Update Region</span>
+                </button>
+            </div>
+
+            <div class="conversations-header">Recent Sessions</div>
+            
+            <div class="conversation-item">
+                <div class="conversation-title">Council Framework Use Cases</div>
+                <div class="conversation-meta">2 messages · 5m ago</div>
+            </div>
+            <div class="conversation-item">
+                <div class="conversation-title">Excessive Context Switching</div>
+                <div class="conversation-meta">2 messages · 12m ago</div>
+            </div>
+            <div class="conversation-item">
+                <div class="conversation-title">Six Thinking Hats Framework</div>
+                <div class="conversation-meta">2 messages · 1h ago</div>
+            </div>
+            <div class="conversation-item">
+                <div class="conversation-title">Council as Six Thinking Hats</div>
+                <div class="conversation-meta">2 messages · 2h ago</div>
+            </div>
+            <div class="conversation-item">
+                <div class="conversation-title">Multiple Roles & Mental Load</div>
+                <div class="conversation-meta">2 messages · 1d ago</div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="welcome-screen">
+                <div class="welcome-icon">
+                    <div class="hexagon"></div>
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <h1>Welcome to LLM Council</h1>
+                <p>Collaborative AI discussions with multiple perspectives</p>
+                <button class="welcome-cta" onclick="openModal()">Start New Council Session</button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">Council Members</div>
+                    <div class="modal-meta">7 / 7 members configured</div>
+                </div>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-controls">
+                    <div class="control-row">
+                        <span class="control-label">Title Model</span>
+                        <select class="control-input">
+                            <option>Claude Haiku 4.5 (us.anthropic.claude-haiku-4-5-20251001-v1:0)</option>
+                            <option>Claude Sonnet 4.5 (us.anthropic.claude-sonnet-4-5-20250929-v1:0)</option>
+                            <option>Claude Opus 4.5 (us.anthropic.claude-opus-4-5-20251101-v1:0)</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-container">
+                        <label class="checkbox-label">
+                            <input type="checkbox" checked>
+                            <span>Disable system prompts in Stage 2 & 3</span>
+                        </label>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">Save Preset</span>
+                        <input type="text" class="control-input" placeholder="Enter preset name">
+                        <button class="small-btn">Save</button>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">Apply Preset</span>
+                        <select class="control-input">
+                            <option>Select preset</option>
+                            <option>Six Thinking Hats</option>
+                            <option>Design Sprint</option>
+                            <option>Devil's Advocate</option>
+                        </select>
+                        <div class="button-group">
+                            <button class="small-btn">Apply</button>
+                            <button class="small-btn delete">Delete</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-text">
+                    → Drag cards to reorder. Updates apply to new messages immediately after saving.
+                </div>
+
+                <div class="members-grid">
+                    <!-- Member 1 -->
+                    <div class="member-card white">
+                        <div class="member-header">
+                            <div class="member-number">Member #1</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="WHITE">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                            <option>Claude Haiku 4.5</option>
+                            <option>Claude Opus 4.5</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the WHITE HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Member 2 -->
+                    <div class="member-card red">
+                        <div class="member-header">
+                            <div class="member-number">Member #2</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="RED">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the RED HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Member 3 -->
+                    <div class="member-card black">
+                        <div class="member-header">
+                            <div class="member-number">Member #3</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="BLACK">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the BLACK HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Member 4 -->
+                    <div class="member-card yellow">
+                        <div class="member-header">
+                            <div class="member-number">Member #4</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="YELLOW">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the YELLOW HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Member 5 -->
+                    <div class="member-card green">
+                        <div class="member-header">
+                            <div class="member-number">Member #5</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="GREEN">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the GREEN HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Member 6 -->
+                    <div class="member-card blue">
+                        <div class="member-header">
+                            <div class="member-number">Member #6</div>
+                            <button class="remove-btn">×</button>
+                        </div>
+                        <div class="member-alias-section">
+                            <span class="member-label">Alias</span>
+                            <input type="text" class="member-alias" value="BLUE">
+                        </div>
+                        <span class="member-label">Model</span>
+                        <select class="member-model">
+                            <option>Claude Sonnet 4.5 (us.anthropic.clau...)</option>
+                        </select>
+                        <span class="member-label">System Prompt (optional)</span>
+                        <textarea class="member-prompt">You are the BLUE HAT member of an LLM Council.</textarea>
+                        <span class="member-label">Role Description</span>
+                        <input type="text" class="member-role" placeholder="Define member role...">
+                        <button class="chairman-btn">Set as Chairman</button>
+                    </div>
+
+                    <!-- Add Member Card -->
+                    <div class="member-card add-member-card">
+                        <div class="add-icon">+</div>
+                        <div class="add-text">Add Member</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openModal() {
+            document.getElementById('modalOverlay').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('modalOverlay').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        // ESC key to close modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // Chairman button toggle
+        document.querySelectorAll('.chairman-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // Remove active from all
+                document.querySelectorAll('.chairman-btn').forEach(b => b.classList.remove('active'));
+                // Add active to clicked
+                this.classList.add('active');
+            });
+        });
+
+        // Add hover effect on conversation items
+        document.querySelectorAll('.conversation-item').forEach(item => {
+            item.addEventListener('click', function() {
+                console.log('Conversation selected');
+            });
+        });
+    </script>
+</body>
+</html>

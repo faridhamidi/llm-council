@@ -343,7 +343,7 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app app-container">
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}

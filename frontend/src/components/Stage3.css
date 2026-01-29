@@ -1,13 +1,14 @@
 .stage3 {
-  background: #f0fff0;
-  border-color: #c8e6c8;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
 }
 
 .final-response {
-  background: #ffffff;
-  padding: 20px;
-  border-radius: 6px;
-  border: 1px solid #c8e6c8;
+  background: var(--bg-secondary);
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .stage3-header {
@@ -19,30 +20,31 @@
 }
 
 .chairman-label {
-  color: #2d8a2d;
+  color: var(--accent-green-light);
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
 .copy-stage3-btn {
   padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid #c8e6c8;
-  background: #f6fff6;
-  color: #256b25;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green-light);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: all 0.2s ease;
 }
 
 .copy-stage3-btn:hover {
-  background: #e6f7e6;
-  border-color: #9dd39d;
+  background: rgba(16, 185, 129, 0.25);
+  border-color: var(--accent-green);
+  box-shadow: 0 0 14px var(--glow);
 }
 
 .final-text {
-  color: #333;
+  color: var(--text-secondary);
   line-height: 1.7;
-  font-size: 15px;
+  font-size: 14px;
 }

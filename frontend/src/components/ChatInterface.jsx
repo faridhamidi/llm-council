@@ -15,6 +15,25 @@ export default function ChatInterface({
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
 
+  const buildLabelMap = (message) => {
+    if (message?.metadata?.label_to_model) {
+      return message.metadata.label_to_model;
+    }
+    if (!message?.stage1 || !Array.isArray(message.stage1)) return null;
+
+    const successful = message.stage1.filter(
+      (result) => result.status !== 'failed' && result.response
+    );
+    if (!successful.length) return null;
+
+    const labelMap = {};
+    successful.forEach((result, index) => {
+      const label = `Response ${String.fromCharCode(65 + index)}`;
+      labelMap[label] = result.model;
+    });
+    return labelMap;
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -75,44 +94,50 @@ export default function ChatInterface({
               ) : (
                 <div className="assistant-message">
                   <div className="message-label">LLM Council</div>
+                  {(() => {
+                    const labelToModel = buildLabelMap(msg);
+                    return (
+                      <>
+                        {/* Stage 1 */}
+                        {msg.loading?.stage1 && (
+                          <div className="stage-loading">
+                            <div className="spinner"></div>
+                            <span>Running Stage 1: Collecting individual responses...</span>
+                          </div>
+                        )}
+                        {msg.stage1 && <Stage1 responses={msg.stage1} />}
 
-                  {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
-                    </div>
-                  )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
+                        {/* Stage 2 */}
+                        {msg.loading?.stage2 && (
+                          <div className="stage-loading">
+                            <div className="spinner"></div>
+                            <span>Running Stage 2: Peer rankings...</span>
+                          </div>
+                        )}
+                        {msg.stage2 && (
+                          <Stage2
+                            rankings={msg.stage2}
+                            labelToModel={labelToModel}
+                            aggregateRankings={msg.metadata?.aggregate_rankings}
+                          />
+                        )}
 
-                  {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
-                    </div>
-                  )}
-                  {msg.stage2 && (
-                    <Stage2
-                      rankings={msg.stage2}
-                      labelToModel={msg.metadata?.label_to_model}
-                      aggregateRankings={msg.metadata?.aggregate_rankings}
-                    />
-                  )}
-
-                  {/* Stage 3 */}
-                  {msg.loading?.stage3 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
-                    </div>
-                  )}
-                  {msg.stage3 && (
-                    <Stage3
-                      finalResponse={msg.stage3}
-                      labelToModel={msg.metadata?.label_to_model}
-                    />
-                  )}
+                        {/* Stage 3 */}
+                        {msg.loading?.stage3 && (
+                          <div className="stage-loading">
+                            <div className="spinner"></div>
+                            <span>Running Stage 3: Final synthesis...</span>
+                          </div>
+                        )}
+                        {msg.stage3 && (
+                          <Stage3
+                            finalResponse={msg.stage3}
+                            labelToModel={labelToModel}
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
