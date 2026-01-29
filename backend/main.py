@@ -10,7 +10,7 @@ import json
 import asyncio
 
 from . import storage
-from .config import set_bedrock_api_key
+from .config import set_bedrock_api_key, get_bedrock_region, set_bedrock_region, BEDROCK_REGION_OPTIONS
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
@@ -41,6 +41,11 @@ class SendMessageRequest(BaseModel):
 class UpdateBedrockTokenRequest(BaseModel):
     """Request to update the Bedrock API token at runtime."""
     token: str
+
+
+class UpdateBedrockRegionRequest(BaseModel):
+    """Request to update the Bedrock region at runtime."""
+    region: str
 
 
 class ConversationMetadata(BaseModel):
@@ -86,6 +91,25 @@ async def get_conversation(conversation_id: str):
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Soft-delete a conversation (move to trash)."""
+    deleted = storage.delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"status": "ok", "deleted": True}
+
+
+@app.post("/api/conversations/{conversation_id}/restore")
+async def restore_conversation(conversation_id: str):
+    """Restore a trashed conversation."""
+    restored = storage.restore_conversation(conversation_id)
+    if not restored:
+        raise HTTPException(status_code=404, detail="Conversation not found in trash")
+    conversation = storage.get_conversation(conversation_id)
+    return {"status": "ok", "restored": True, "conversation": conversation}
 
 
 @app.post("/api/conversations/{conversation_id}/message")
@@ -143,6 +167,33 @@ async def update_bedrock_token(request: UpdateBedrockTokenRequest):
 
     set_bedrock_api_key(token)
     return {"status": "ok"}
+
+
+@app.get("/api/settings/bedrock-region")
+async def get_bedrock_region_setting():
+    """Get the current Bedrock region."""
+    return {"region": get_bedrock_region()}
+
+
+@app.get("/api/settings/bedrock-region/options")
+async def get_bedrock_region_options():
+    """Get supported Bedrock region options for the UI."""
+    return {"regions": BEDROCK_REGION_OPTIONS}
+
+
+@app.post("/api/settings/bedrock-region")
+async def update_bedrock_region(request: UpdateBedrockRegionRequest):
+    """Update the Bedrock region at runtime (in-memory only)."""
+    region = request.region.strip()
+    if not region:
+        raise HTTPException(status_code=400, detail="Region is required")
+
+    allowed = {opt["code"] for opt in BEDROCK_REGION_OPTIONS}
+    if region not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported region")
+
+    set_bedrock_region(region)
+    return {"status": "ok", "region": region}
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")

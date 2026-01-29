@@ -47,6 +47,40 @@ export const api = {
   },
 
   /**
+   * Delete a conversation (soft-delete).
+   */
+  async deleteConversation(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to delete conversation');
+    }
+    return response.json();
+  },
+
+  /**
+   * Restore a deleted conversation.
+   */
+  async restoreConversation(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/restore`,
+      {
+        method: 'POST',
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to restore conversation');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {
@@ -129,6 +163,46 @@ export const api = {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to update Bedrock token');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get current Bedrock region.
+   */
+  async getBedrockRegion() {
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`);
+    if (!response.ok) {
+      throw new Error('Failed to load Bedrock region');
+    }
+    return response.json();
+  },
+
+  /**
+   * List Bedrock region options.
+   */
+  async listBedrockRegions() {
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-region/options`);
+    if (!response.ok) {
+      throw new Error('Failed to load Bedrock region options');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update the Bedrock region at runtime.
+   */
+  async updateBedrockRegion(region) {
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ region }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to update Bedrock region');
     }
     return response.json();
   },

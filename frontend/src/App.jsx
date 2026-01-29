@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -10,6 +10,10 @@ function App() {
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [streamController, setStreamController] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
+  const deleteTimerRef = useRef(null);
+  const deleteIntervalRef = useRef(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -38,6 +42,112 @@ function App() {
       setCurrentConversation(conv);
     } catch (error) {
       console.error('Failed to load conversation:', error);
+    }
+  };
+
+  const clearDeleteTimers = () => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    if (deleteIntervalRef.current) {
+      clearInterval(deleteIntervalRef.current);
+      deleteIntervalRef.current = null;
+    }
+  };
+
+  const handleDeleteConversation = async (id) => {
+    if (!id) return;
+
+    clearDeleteTimers();
+    const conversationIndex = conversations.findIndex((conv) => conv.id === id);
+    const conversationMeta = conversations.find((conv) => conv.id === id);
+    const wasActive = currentConversationId === id;
+    setPendingDelete({ id, conversationIndex, conversationMeta, wasActive });
+    setUndoSecondsLeft(10);
+
+    setConversations((prev) => prev.filter((conv) => conv.id !== id));
+    if (currentConversationId === id) {
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+    }
+
+    deleteIntervalRef.current = setInterval(() => {
+      setUndoSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    deleteTimerRef.current = setTimeout(async () => {
+      try {
+        await api.deleteConversation(id);
+      } catch (error) {
+        console.error('Failed to delete conversation:', error);
+        if (conversationMeta) {
+          setConversations((prev) => {
+            const next = [...prev];
+            const insertAt = Math.min(
+              Math.max(conversationIndex, 0),
+              next.length
+            );
+            next.splice(insertAt, 0, conversationMeta);
+            return next;
+          });
+        } else {
+          loadConversations();
+        }
+      } finally {
+        setPendingDelete(null);
+        setUndoSecondsLeft(0);
+        clearDeleteTimers();
+      }
+    }, 10000);
+  };
+
+  const handleUndoDelete = async () => {
+    if (!pendingDelete?.id) return;
+    const { id, conversationMeta, conversationIndex, wasActive } = pendingDelete;
+    setPendingDelete(null);
+    setUndoSecondsLeft(0);
+    clearDeleteTimers();
+    if (conversationMeta) {
+      setConversations((prev) => {
+        const next = [...prev];
+        const insertAt = Math.min(
+          Math.max(conversationIndex, 0),
+          next.length
+        );
+        next.splice(insertAt, 0, conversationMeta);
+        return next;
+      });
+    } else {
+      loadConversations();
+    }
+    if (wasActive) {
+      setCurrentConversationId(id);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete?.id) return;
+    const { id, conversationMeta, conversationIndex } = pendingDelete;
+    setPendingDelete(null);
+    setUndoSecondsLeft(0);
+    clearDeleteTimers();
+    try {
+      await api.deleteConversation(id);
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      if (conversationMeta) {
+        setConversations((prev) => {
+          const next = [...prev];
+          const insertAt = Math.min(
+            Math.max(conversationIndex, 0),
+            next.length
+          );
+          next.splice(insertAt, 0, conversationMeta);
+          return next;
+        });
+      } else {
+        loadConversations();
+      }
     }
   };
 
@@ -239,6 +349,7 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <ChatInterface
         conversation={currentConversation}
@@ -246,6 +357,26 @@ function App() {
         onStop={handleStop}
         isLoading={isLoading}
       />
+      {pendingDelete && (
+        <div className="undo-toast">
+          <div className="undo-message">
+            Conversation removed.
+            {undoSecondsLeft > 0 && (
+              <span className="undo-countdown">
+                Deleting in {undoSecondsLeft}s
+              </span>
+            )}
+          </div>
+          <div className="undo-actions">
+            <button className="undo-secondary" onClick={handleUndoDelete}>
+              Undo
+            </button>
+            <button className="undo-primary" onClick={handleConfirmDelete}>
+              Delete now
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

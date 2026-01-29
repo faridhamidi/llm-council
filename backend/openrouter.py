@@ -2,7 +2,7 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import BEDROCK_RUNTIME_URL, get_bedrock_api_key
+from .config import get_bedrock_api_key, get_bedrock_runtime_url
 
 
 async def query_model(
@@ -51,7 +51,7 @@ async def query_model(
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
-                f"{BEDROCK_RUNTIME_URL}/model/{model}/converse",
+                f"{get_bedrock_runtime_url()}/model/{model}/converse",
                 headers=headers,
                 json=payload
             )

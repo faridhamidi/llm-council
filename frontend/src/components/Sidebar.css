@@ -1,5 +1,8 @@
 .sidebar {
-  width: 260px;
+  width: 17vw;
+  min-width: 17vw;
+  flex: 0 0 17vw;
+  overflow-x: hidden;
   background: #f8f8f8;
   border-right: 1px solid #e0e0e0;
   display: flex;
@@ -52,6 +55,52 @@
 .token-refresh-btn:hover {
   background: #f1f7ff;
   border-color: #9bbbe5;
+}
+
+.region-selector {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.region-selector label {
+  font-size: 12px;
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.region-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.region-row select {
+  flex: 1;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #fff;
+  color: #111827;
+}
+
+.region-apply-btn {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #9bbbe5;
+  background: #f1f7ff;
+  color: #1d4f8b;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.region-apply-btn:hover {
+  background: #e3efff;
+  border-color: #7aa8de;
 }
 
 .token-status {
@@ -107,6 +156,30 @@
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+
+.conversation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conversation-delete-btn {
+  border: none;
+  background: transparent;
+  color: #9aa0a6;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.conversation-delete-btn:hover {
+  color: #d93025;
+  background: #fbeaea;
 }
 
 .conversation-meta {

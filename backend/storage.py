@@ -7,15 +7,27 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from .config import DATA_DIR
 
+TRASH_DIR = os.path.join(DATA_DIR, ".trash")
+
 
 def ensure_data_dir():
     """Ensure the data directory exists."""
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 
+def ensure_trash_dir():
+    """Ensure the trash directory exists."""
+    Path(TRASH_DIR).mkdir(parents=True, exist_ok=True)
+
+
 def get_conversation_path(conversation_id: str) -> str:
     """Get the file path for a conversation."""
     return os.path.join(DATA_DIR, f"{conversation_id}.json")
+
+
+def get_trash_path(conversation_id: str) -> str:
+    """Get the file path for a trashed conversation."""
+    return os.path.join(TRASH_DIR, f"{conversation_id}.json")
 
 
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
@@ -170,3 +182,47 @@ def update_conversation_title(conversation_id: str, title: str):
 
     conversation["title"] = title
     save_conversation(conversation)
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """
+    Soft-delete a conversation by moving it to the trash directory.
+
+    Args:
+        conversation_id: Conversation identifier
+
+    Returns:
+        True if deleted, False if not found
+    """
+    ensure_data_dir()
+    ensure_trash_dir()
+
+    src = get_conversation_path(conversation_id)
+    if not os.path.exists(src):
+        return False
+
+    dst = get_trash_path(conversation_id)
+    os.replace(src, dst)
+    return True
+
+
+def restore_conversation(conversation_id: str) -> bool:
+    """
+    Restore a trashed conversation back to the data directory.
+
+    Args:
+        conversation_id: Conversation identifier
+
+    Returns:
+        True if restored, False if not found in trash
+    """
+    ensure_data_dir()
+    ensure_trash_dir()
+
+    src = get_trash_path(conversation_id)
+    if not os.path.exists(src):
+        return False
+
+    dst = get_conversation_path(conversation_id)
+    os.replace(src, dst)
+    return True

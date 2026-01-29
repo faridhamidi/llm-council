@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../api';
 import './Sidebar.css';
 
@@ -7,10 +7,35 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  onDeleteConversation,
 }) {
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [tokenStatus, setTokenStatus] = useState(null);
+  const [regionOptions, setRegionOptions] = useState([]);
+  const [selectedRegion, setSelectedRegion] = useState('');
+  const [regionStatus, setRegionStatus] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadRegions = async () => {
+      try {
+        const [optionsResponse, regionResponse] = await Promise.all([
+          api.listBedrockRegions(),
+          api.getBedrockRegion(),
+        ]);
+        if (!isMounted) return;
+        setRegionOptions(optionsResponse.regions || []);
+        setSelectedRegion(regionResponse.region || '');
+      } catch (error) {
+        console.error('Failed to load region settings:', error);
+      }
+    };
+    loadRegions();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const openTokenModal = () => {
     setTokenStatus(null);
@@ -39,6 +64,19 @@ export default function Sidebar({
     }
   };
 
+  const handleRegionUpdate = async () => {
+    if (!selectedRegion) {
+      setRegionStatus({ type: 'error', message: 'Select a region first.' });
+      return;
+    }
+    try {
+      await api.updateBedrockRegion(selectedRegion);
+      setRegionStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
+    } catch (error) {
+      setRegionStatus({ type: 'error', message: error.message || 'Failed to update region.' });
+    }
+  };
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
@@ -49,6 +87,31 @@ export default function Sidebar({
         <button className="token-refresh-btn" onClick={openTokenModal}>
           Refresh Bedrock Token
         </button>
+        <div className="region-selector">
+          <label htmlFor="bedrock-region-select">Bedrock Region</label>
+          <div className="region-row">
+            <select
+              id="bedrock-region-select"
+              value={selectedRegion}
+              onChange={(event) => setSelectedRegion(event.target.value)}
+            >
+              <option value="">Select region</option>
+              {regionOptions.map((region) => (
+                <option key={region.code} value={region.code}>
+                  {region.label} ({region.code})
+                </option>
+              ))}
+            </select>
+            <button className="region-apply-btn" onClick={handleRegionUpdate}>
+              Update
+            </button>
+          </div>
+        </div>
+        {regionStatus && (
+          <div className={`token-status ${regionStatus.type}`}>
+            {regionStatus.message}
+          </div>
+        )}
         {tokenStatus && (
           <div className={`token-status ${tokenStatus.type}`}>
             {tokenStatus.message}
@@ -68,8 +131,21 @@ export default function Sidebar({
               }`}
               onClick={() => onSelectConversation(conv.id)}
             >
-              <div className="conversation-title">
-                {conv.title || 'New Conversation'}
+              <div className="conversation-row">
+                <div className="conversation-title">
+                  {conv.title || 'New Conversation'}
+                </div>
+                <button
+                  className="conversation-delete-btn"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteConversation(conv.id);
+                  }}
+                  aria-label="Delete conversation"
+                  title="Delete conversation"
+                >
+                  ×
+                </button>
               </div>
               <div className="conversation-meta">
                 {conv.message_count} messages

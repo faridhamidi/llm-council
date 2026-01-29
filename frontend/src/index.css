@@ -31,6 +31,7 @@ body {
 /* Global markdown styling */
 .markdown-content {
   padding: 12px;
+  overflow-x: auto;
 }
 
 .markdown-content p {
@@ -99,9 +100,11 @@ body {
 
 .markdown-content table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 0 0 12px 0;
   font-size: 0.95em;
+  table-layout: fixed;
 }
 
 .markdown-content th,
@@ -110,6 +113,8 @@ body {
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .markdown-content th {
