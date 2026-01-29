@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
+import logoMark from '../assets/NetZero2050-logo.svg';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -316,11 +317,15 @@ export default function Sidebar({
   return (
     <div className="sidebar">
       <div className="logo-section">
-        <div className="logo">
-          <span className="logo-icon">⚡</span>
-          <span>LLM Council</span>
+        <div className="logo-row">
+          <div className="logo-icon" aria-hidden="true">
+            <img src={logoMark} alt="" className="logo-mark" />
+          </div>
+          <div className="logo-text">
+            <div className="logo-title">LLM Council</div>
+            <div className="subtitle">Collaborative AI</div>
+          </div>
         </div>
-        <div className="subtitle">Collaborative AI</div>
       </div>
 
       <div className="sidebar-actions">

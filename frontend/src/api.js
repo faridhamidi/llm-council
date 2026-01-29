@@ -2,7 +2,9 @@
  * API client for the LLM Council backend.
  */
 
-const API_BASE = 'http://localhost:8001';
+const API_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const API_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const API_BASE = `${API_PROTOCOL}//${API_HOST}:8001`;
 
 export const api = {
   /**

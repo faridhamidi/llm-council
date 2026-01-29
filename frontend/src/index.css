@@ -4,6 +4,7 @@
   --font-sans: 'Space Grotesk', 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, monospace;
 
+  /* Brand palette (foundation) */
   --bg-primary: #0b0d0f;
   --bg-secondary: #121417;
   --bg-tertiary: #171a1f;
@@ -24,6 +25,55 @@
   --accent-blue: #3b82f6;
   --glow: rgba(62, 207, 142, 0.18);
   --glow-strong: rgba(62, 207, 142, 0.35);
+
+  /* Semantic tokens */
+  --surface-0: var(--bg-primary);
+  --surface-1: var(--bg-secondary);
+  --surface-2: var(--bg-tertiary);
+  --surface-3: var(--bg-elevated);
+  --surface-hover: var(--bg-hover);
+  --border-1: var(--border-primary);
+  --border-2: var(--border-secondary);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-tertiary);
+  --accent-1: var(--accent-green);
+  --accent-1-strong: var(--accent-green-dark);
+  --accent-1-soft: rgba(62, 207, 142, 0.16);
+  --accent-warning: var(--accent-yellow);
+  --accent-danger: var(--accent-red);
+  --accent-info: var(--accent-blue);
+  --focus-ring: rgba(62, 207, 142, 0.45);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  /* Radii */
+  --radius-1: 6px;
+  --radius-2: 10px;
+  --radius-3: 14px;
+  --radius-4: 18px;
+  --radius-5: 24px;
+
+  /* Elevation */
+  --shadow-1: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 14px 36px rgba(0, 0, 0, 0.45);
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --duration-slow: 360ms;
 
   font-family: var(--font-sans);
   line-height: 1.6;

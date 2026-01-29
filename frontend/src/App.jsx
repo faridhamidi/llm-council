@@ -12,6 +12,7 @@ function App() {
   const [streamController, setStreamController] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const deleteTimerRef = useRef(null);
   const deleteIntervalRef = useRef(null);
 
@@ -159,6 +160,7 @@ function App() {
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      setIsSidebarOpen(false);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -166,6 +168,7 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    setIsSidebarOpen(false);
   };
 
   const handleSendMessage = async (content) => {
@@ -343,19 +346,49 @@ function App() {
   };
 
   return (
-    <div className="app app-container">
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
-        onDeleteConversation={handleDeleteConversation}
-      />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        onStop={handleStop}
-        isLoading={isLoading}
+    <div className={`app app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
+      <div className="sidebar-panel">
+        <div className="mobile-sidebar-header">
+          <button
+            className="mobile-sidebar-close"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Close sidebar"
+          >
+            ×
+          </button>
+        </div>
+        <Sidebar
+          conversations={conversations}
+          currentConversationId={currentConversationId}
+          onSelectConversation={handleSelectConversation}
+          onNewConversation={handleNewConversation}
+          onDeleteConversation={handleDeleteConversation}
+        />
+      </div>
+      <div className="chat-panel">
+        <div className="mobile-topbar">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Open sidebar"
+          >
+            Menu
+          </button>
+          <div className="mobile-title">LLM Council</div>
+        </div>
+        <ChatInterface
+          conversation={currentConversation}
+          onSendMessage={handleSendMessage}
+          onStop={handleStop}
+          isLoading={isLoading}
+        />
+      </div>
+      <button
+        className="sidebar-overlay"
+        type="button"
+        onClick={() => setIsSidebarOpen(false)}
+        aria-hidden={!isSidebarOpen}
+        tabIndex={isSidebarOpen ? 0 : -1}
       />
       {pendingDelete && (
         <div className="undo-toast">

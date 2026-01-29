@@ -113,6 +113,9 @@ A strict format ensures reliable parsing:
 ### Relative Imports
 All backend modules use relative imports (e.g., `from .config import ...`) so `python -m backend.main` works from repo root.
 
+### Design System Reference
+See `DESIGN_SYSTEM.md` for the current design system tokens, typography, and UI guidelines. Extend or evolve the system there so future agents have a single source of truth.
+
 ### Port Configuration
 - Backend: 8001
 - Frontend: 5173 (Vite default)

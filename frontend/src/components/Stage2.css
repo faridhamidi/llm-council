@@ -152,3 +152,56 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+@media (max-width: 780px) {
+  .stage2 h4 {
+    font-size: 12px;
+  }
+
+  .stage-description {
+    font-size: 11px;
+  }
+
+  .stage2 .tab {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .stage2 .tab-content {
+    padding: 12px;
+  }
+
+  .ranking-content {
+    font-size: 12px;
+  }
+
+  .aggregate-rankings {
+    padding: 12px;
+  }
+
+  .aggregate-item {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .rank-position {
+    font-size: 13px;
+    min-width: 28px;
+  }
+
+  .rank-model {
+    font-size: 12px;
+  }
+
+  .rank-score {
+    font-size: 11px;
+  }
+
+  .rank-count {
+    font-size: 10px;
+  }
+
+  .parsed-ranking ol {
+    padding-left: 18px;
+  }
+}

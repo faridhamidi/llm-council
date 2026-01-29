@@ -11,36 +11,56 @@
 }
 
 .logo-section {
-  padding: 6px 10px 8px;
+  padding: 6px 10px 18px;
 }
 
-.logo {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.5px;
+.mobile-sidebar-header {
+  display: none;
+}
+
+.logo-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: stretch;
+  gap: 12px;
 }
 
 .logo-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
-  display: inline-flex;
+  width: 56px;
+  height: 56px;
+  align-self: flex-start;
+  border-radius: 10px;
+  background: var(--accent-green);
+  display: flex;
   align-items: center;
   justify-content: center;
-  color: #06130d;
-  font-size: 16px;
-  font-weight: 700;
+  padding: 8px;
   box-shadow: 0 0 18px var(--glow);
 }
 
+.logo-mark {
+  width: 86%;
+  height: 86%;
+  object-fit: contain;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.logo-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
 .subtitle {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 0;
+  font-size: 13px;
   color: var(--text-tertiary);
   font-weight: 600;
   letter-spacing: 0.6px;
@@ -855,6 +875,68 @@
     max-height: 40vh;
     border-right: none;
     border-bottom: 1px solid var(--border-primary);
+  }
+
+  .sidebar-panel .sidebar {
+    height: 100vh;
+    max-height: none;
+    border-bottom: none;
+  }
+
+  .mobile-sidebar-header {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 12px 0;
+    background: var(--bg-secondary);
+  }
+
+  .mobile-sidebar-close {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--border-primary);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mobile-sidebar-close:hover {
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+  }
+
+  .council-modal {
+    width: 94vw;
+  }
+
+  .modal-controls {
+    padding: 16px;
+  }
+
+  .control-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .control-label {
+    margin-bottom: 2px;
+  }
+
+  .control-input {
+    width: 100%;
+  }
+
+  .button-group {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .members-grid {
+    grid-template-columns: 1fr;
   }
 }
 

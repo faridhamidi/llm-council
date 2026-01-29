@@ -14,15 +14,15 @@ BACKEND_PID=$!
 sleep 2
 
 # Start frontend
-echo "Starting frontend on http://localhost:5173..."
+echo "Starting frontend on http://0.0.0.0:5173..."
 cd frontend
-npm run dev &
+npm run dev -- --host 0.0.0.0 &
 FRONTEND_PID=$!
 
 echo ""
 echo "✓ LLM Council is running!"
 echo "  Backend:  http://localhost:8001"
-echo "  Frontend: http://localhost:5173"
+echo "  Frontend: http://0.0.0.0:5173"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 

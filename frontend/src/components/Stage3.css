@@ -48,3 +48,18 @@
   line-height: 1.7;
   font-size: 14px;
 }
+
+@media (max-width: 780px) {
+  .final-response {
+    padding: 14px;
+  }
+
+  .stage3-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .final-text {
+    font-size: 13px;
+  }
+}

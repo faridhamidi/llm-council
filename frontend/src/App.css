@@ -18,14 +18,22 @@
   z-index: 0;
 }
 
-.app > .sidebar {
+.sidebar-panel {
   position: relative;
   z-index: 2;
 }
 
-.app > .chat-interface {
+.chat-panel {
   position: relative;
   z-index: 1;
+}
+
+.mobile-topbar {
+  display: none;
+}
+
+.sidebar-overlay {
+  display: none;
 }
 
 .undo-toast {
@@ -104,6 +112,83 @@
 @media (max-width: 780px) {
   .app {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 100vw;
+    background: var(--bg-secondary);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 1200;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  }
+
+  .app.sidebar-open .sidebar-panel {
+    transform: translateX(0);
+  }
+
+  .chat-panel {
+    min-height: 100vh;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-primary);
+    background: rgba(12, 14, 16, 0.92);
+    backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    height: 56px;
+  }
+
+  .mobile-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: var(--text-primary);
+  }
+
+  .sidebar-toggle {
+    border: 1px solid var(--border-primary);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .sidebar-toggle:hover {
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1100;
+    border: none;
+  }
+
+  .app.sidebar-open .sidebar-overlay {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .undo-toast {

@@ -257,14 +257,53 @@
 
 @media (max-width: 780px) {
   .chat-interface {
-    height: auto;
+    height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
   }
 
   .messages-container {
-    padding: 20px 16px 32px;
+    padding: 16px 14px 24px;
   }
 
   .user-message .message-content {
     max-width: 100%;
+  }
+
+  .message-label {
+    font-size: 10px;
+    letter-spacing: 0.6px;
+  }
+
+  .user-message .message-content {
+    padding: 12px;
+    font-size: 13px;
+  }
+
+  .assistant-message {
+    padding: 12px 14px;
+  }
+
+  .loading-indicator,
+  .stage-loading {
+    font-size: 12px;
+  }
+
+  .input-form {
+    padding: 14px;
+    gap: 10px;
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+  }
+
+  .message-input {
+    padding: 12px;
+    font-size: 13px;
+    min-height: 64px;
+  }
+
+  .send-button {
+    padding: 10px 18px;
+    font-size: 13px;
   }
 }
