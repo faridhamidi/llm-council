@@ -1,14 +1,12 @@
-"""Runtime-configurable council settings with file persistence."""
+"""Runtime-configurable council settings with SQLite persistence."""
 
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
+from datetime import datetime
 from typing import Dict, Any, List
 
 from .config import (
-    DATA_DIR,
     COUNCIL_MODELS,
     COUNCIL_ALIASES,
     CHAIRMAN_MODEL,
@@ -16,20 +14,15 @@ from .config import (
     TITLE_MODEL,
     resolve_model_for_region,
 )
+from .db import with_connection
 
 MAX_COUNCIL_MEMBERS = 7
-SETTINGS_FILENAME = "council_settings.json"
 
 _SETTINGS: Dict[str, Any] | None = None
 
 
-def _settings_path() -> str:
-    data_root = Path(DATA_DIR).parent
-    return os.path.join(data_root, SETTINGS_FILENAME)
-
-
-def _ensure_settings_dir() -> None:
-    Path(_settings_path()).parent.mkdir(parents=True, exist_ok=True)
+def _now_iso() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 def _default_settings() -> Dict[str, Any]:
@@ -79,35 +72,41 @@ def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     return settings, changed
 
 
-def load_settings() -> Dict[str, Any]:
-    """Load settings from disk or create defaults."""
-    _ensure_settings_dir()
-    path = _settings_path()
-    if not os.path.exists(path):
-        settings = _default_settings()
-        save_settings(settings)
+def _load_settings_from_db() -> Dict[str, Any]:
+    with with_connection() as conn:
+        row = conn.execute(
+            "SELECT settings_json FROM council_settings WHERE id = 1"
+        ).fetchone()
+
+    if row:
+        settings = json.loads(row["settings_json"])
+        settings, changed = _upgrade_settings(settings)
+        if changed:
+            save_settings(settings)
         return settings
 
-    with open(path, "r") as file:
-        settings = json.load(file)
-    settings, changed = _upgrade_settings(settings)
-    if changed:
-        save_settings(settings)
+    settings = _default_settings()
+    save_settings(settings)
     return settings
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
-    """Persist settings to disk."""
-    _ensure_settings_dir()
-    path = _settings_path()
-    with open(path, "w") as file:
-        json.dump(settings, file, indent=2)
+    with with_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO council_settings (id, settings_json, updated_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at
+            """,
+            (json.dumps(settings), _now_iso()),
+        )
+        conn.commit()
 
 
 def get_settings() -> Dict[str, Any]:
     global _SETTINGS
     if _SETTINGS is None:
-        _SETTINGS = load_settings()
+        _SETTINGS = _load_settings_from_db()
     return _SETTINGS
 
 

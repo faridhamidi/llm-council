@@ -2,14 +2,16 @@
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import os
 
 from . import storage
+from . import db
 from .config import (
     set_bedrock_api_key,
     get_bedrock_region,
@@ -32,6 +34,7 @@ from .council_presets import (
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
+API_ACCESS_KEY = os.getenv("LLM_COUNCIL_ACCESS_KEY", "").strip()
 
 # Track active streaming tasks so they can be cancelled from the UI.
 ACTIVE_STREAMS: Dict[str, Dict[str, Any]] = {}
@@ -45,6 +48,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Simple shared-key gate for frontend-only access.
+@app.middleware("http")
+async def _require_access_key(request: Request, call_next):
+    if API_ACCESS_KEY and request.url.path.startswith("/api"):
+        supplied = request.headers.get("x-llm-council-key", "")
+        if supplied != API_ACCESS_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
 
 
 class CreateConversationRequest(BaseModel):
@@ -517,3 +529,11 @@ async def cancel_message_stream(conversation_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+# Ensure database connectivity on startup.
+@app.on_event("startup")
+async def _startup_check_db() -> None:
+    try:
+        db.check_db()
+    except Exception as exc:
+        print(f"Database health check failed: {exc}")
+        raise

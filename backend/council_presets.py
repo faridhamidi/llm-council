@@ -1,30 +1,16 @@
-"""Council settings presets with file persistence."""
+"""Council settings presets persisted in SQLite."""
 
 from __future__ import annotations
 
 import json
-import os
 import uuid
 import datetime as dt
-from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
-from .config import DATA_DIR
+from .db import with_connection
 from .council_settings import get_settings, MAX_COUNCIL_MEMBERS
 
-PRESETS_FILENAME = "council_presets.json"
 PRESETS_VERSION = 1
-
-_PRESETS: Dict[str, Any] | None = None
-
-
-def _presets_path() -> str:
-    data_root = Path(DATA_DIR).parent
-    return os.path.join(data_root, PRESETS_FILENAME)
-
-
-def _ensure_presets_dir() -> None:
-    Path(_presets_path()).parent.mkdir(parents=True, exist_ok=True)
 
 
 def _now_iso() -> str:
@@ -63,7 +49,7 @@ def _default_four_member_preset() -> Dict[str, Any]:
             }
         )
     settings = {
-        "version": 1,
+        "version": PRESETS_VERSION,
         "max_members": MAX_COUNCIL_MEMBERS,
         "members": members,
         "chairman_id": members[0]["id"],
@@ -75,129 +61,143 @@ def _default_four_member_preset() -> Dict[str, Any]:
     return _normalize_settings(settings)
 
 
-def _default_presets() -> Dict[str, Any]:
-    hats_settings = _normalize_settings(get_settings())
-    presets = [
-        {
-            "id": str(uuid.uuid4()),
-            "name": "Six Thinking Hats",
-            "created_at": _now_iso(),
-            "settings": hats_settings,
-        },
-        {
-            "id": str(uuid.uuid4()),
-            "name": "Default 4 Members",
-            "created_at": _now_iso(),
-            "settings": _default_four_member_preset(),
-        },
-    ]
-    return {"version": PRESETS_VERSION, "presets": presets}
+def _ensure_defaults() -> None:
+    with with_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) as count FROM council_presets").fetchone()
+        if row and row["count"] > 0:
+            return
 
+        hats_settings = _normalize_settings(get_settings())
+        presets = [
+            {
+                "id": str(uuid.uuid4()),
+                "name": "Six Thinking Hats",
+                "created_at": _now_iso(),
+                "settings": hats_settings,
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "name": "Default 4 Members",
+                "created_at": _now_iso(),
+                "settings": _default_four_member_preset(),
+            },
+        ]
 
-def _upgrade_presets(data: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-    changed = False
-    if data.get("version") != PRESETS_VERSION:
-        data["version"] = PRESETS_VERSION
-        changed = True
-    presets = data.get("presets", [])
-    for preset in presets:
-        if "id" not in preset:
-            preset["id"] = str(uuid.uuid4())
-            changed = True
-        if "created_at" not in preset:
-            preset["created_at"] = _now_iso()
-            changed = True
-        if "settings" in preset:
-            preset["settings"] = _normalize_settings(preset["settings"])
-    return data, changed
-
-
-def load_presets() -> Dict[str, Any]:
-    _ensure_presets_dir()
-    path = _presets_path()
-    if not os.path.exists(path):
-        presets = _default_presets()
-        save_presets(presets)
-        return presets
-    with open(path, "r") as file:
-        data = json.load(file)
-    data, changed = _upgrade_presets(data)
-    if changed:
-        save_presets(data)
-    return data
-
-
-def save_presets(data: Dict[str, Any]) -> None:
-    _ensure_presets_dir()
-    path = _presets_path()
-    with open(path, "w") as file:
-        json.dump(data, file, indent=2)
-
-
-def get_presets() -> Dict[str, Any]:
-    global _PRESETS
-    if _PRESETS is None:
-        _PRESETS = load_presets()
-    return _PRESETS
+        for preset in presets:
+            conn.execute(
+                """
+                INSERT INTO council_presets (id, name, created_at, settings_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    preset["id"],
+                    preset["name"],
+                    preset["created_at"],
+                    json.dumps(preset["settings"]),
+                ),
+            )
+        conn.commit()
 
 
 def list_presets() -> List[Dict[str, Any]]:
-    data = get_presets()
+    _ensure_defaults()
+    with with_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_at FROM council_presets ORDER BY created_at DESC"
+        ).fetchall()
+
     return [
-        {
-            "id": preset.get("id"),
-            "name": preset.get("name"),
-            "created_at": preset.get("created_at"),
-        }
-        for preset in data.get("presets", [])
+        {"id": row["id"], "name": row["name"], "created_at": row["created_at"]}
+        for row in rows
     ]
 
 
-def _find_preset_by_name(name: str, presets: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+def _find_preset_by_name(name: str) -> Dict[str, Any] | None:
+    _ensure_defaults()
     normalized = name.strip().lower()
-    for preset in presets:
-        if preset.get("name", "").strip().lower() == normalized:
-            return preset
-    return None
+    with with_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, created_at, updated_at, settings_json FROM council_presets WHERE lower(name) = ?",
+            (normalized,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "settings": json.loads(row["settings_json"]),
+    }
 
 
 def create_preset(name: str, settings: Dict[str, Any]) -> Dict[str, Any]:
-    data = get_presets()
-    presets = data.get("presets", [])
-    existing = _find_preset_by_name(name, presets)
-    if existing:
-        existing["settings"] = _normalize_settings(settings)
-        existing["name"] = name.strip()
-        existing["updated_at"] = _now_iso()
-        save_presets(data)
-        return existing
+    _ensure_defaults()
+    existing = _find_preset_by_name(name)
+    normalized_settings = _normalize_settings(settings)
+    now = _now_iso()
 
-    preset = {
-        "id": str(uuid.uuid4()),
-        "name": name.strip(),
-        "created_at": _now_iso(),
-        "settings": _normalize_settings(settings),
-    }
-    presets.append(preset)
-    data["presets"] = presets
-    save_presets(data)
-    return preset
+    with with_connection() as conn:
+        if existing:
+            conn.execute(
+                """
+                UPDATE council_presets
+                SET settings_json = ?, name = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (json.dumps(normalized_settings), name.strip(), now, existing["id"]),
+            )
+            conn.commit()
+            existing.update({
+                "name": name.strip(),
+                "updated_at": now,
+                "settings": normalized_settings,
+            })
+            return existing
+
+        preset = {
+            "id": str(uuid.uuid4()),
+            "name": name.strip(),
+            "created_at": now,
+            "settings": normalized_settings,
+        }
+        conn.execute(
+            """
+            INSERT INTO council_presets (id, name, created_at, settings_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (preset["id"], preset["name"], preset["created_at"], json.dumps(normalized_settings)),
+        )
+        conn.commit()
+        return preset
 
 
 def find_preset(preset_id: str) -> Dict[str, Any] | None:
-    data = get_presets()
-    for preset in data.get("presets", []):
-        if preset.get("id") == preset_id:
-            return preset
-    return None
+    _ensure_defaults()
+    with with_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, created_at, updated_at, settings_json FROM council_presets WHERE id = ?",
+            (preset_id,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "settings": json.loads(row["settings_json"]),
+    }
 
 
 def delete_preset(preset_id: str) -> bool:
-    data = get_presets()
-    presets = data.get("presets", [])
-    next_presets = [preset for preset in presets if preset.get("id") != preset_id]
-    if len(next_presets) == len(presets):
-        return False
-    data["presets"] = next_presets
-    save_presets(data)
-    return True
+    _ensure_defaults()
+    with with_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM council_presets WHERE id = ?",
+            (preset_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0

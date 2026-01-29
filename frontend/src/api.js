@@ -5,13 +5,21 @@
 const API_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
 const API_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 const API_BASE = `${API_PROTOCOL}//${API_HOST}:8001`;
+const ACCESS_KEY = import.meta.env.VITE_LLM_COUNCIL_ACCESS_KEY || '';
+
+const withAuth = (headers = {}) => ({
+  ...headers,
+  ...(ACCESS_KEY ? { 'x-llm-council-key': ACCESS_KEY } : {}),
+});
 
 export const api = {
   /**
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -24,9 +32,9 @@ export const api = {
   async createConversation() {
     const response = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({}),
     });
     if (!response.ok) {
@@ -40,7 +48,8 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      { headers: withAuth() }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -56,6 +65,7 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}`,
       {
         method: 'DELETE',
+        headers: withAuth(),
       }
     );
     if (!response.ok) {
@@ -73,6 +83,7 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/restore`,
       {
         method: 'POST',
+        headers: withAuth(),
       }
     );
     if (!response.ok) {
@@ -90,9 +101,9 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/message`,
       {
         method: 'POST',
-        headers: {
+        headers: withAuth({
           'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify({ content }),
       }
     );
@@ -115,9 +126,9 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
         method: 'POST',
-        headers: {
+        headers: withAuth({
           'Content-Type': 'application/json',
-        },
+        }),
         signal,
         body: JSON.stringify({ content }),
       }
@@ -157,9 +168,9 @@ export const api = {
   async updateBedrockToken(token) {
     const response = await fetch(`${API_BASE}/api/settings/bedrock-token`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({ token }),
     });
     if (!response.ok) {
@@ -173,7 +184,9 @@ export const api = {
    * Get current Bedrock region.
    */
   async getBedrockRegion() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`);
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to load Bedrock region');
     }
@@ -184,7 +197,9 @@ export const api = {
    * List Bedrock region options.
    */
   async listBedrockRegions() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-region/options`);
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-region/options`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to load Bedrock region options');
     }
@@ -197,9 +212,9 @@ export const api = {
   async updateBedrockRegion(region) {
     const response = await fetch(`${API_BASE}/api/settings/bedrock-region`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({ region }),
     });
     if (!response.ok) {
@@ -213,7 +228,9 @@ export const api = {
    * Get council settings.
    */
   async getCouncilSettings() {
-    const response = await fetch(`${API_BASE}/api/settings/council`);
+    const response = await fetch(`${API_BASE}/api/settings/council`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to load council settings');
     }
@@ -226,9 +243,9 @@ export const api = {
   async updateCouncilSettings(settings) {
     const response = await fetch(`${API_BASE}/api/settings/council`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(settings),
     });
     if (!response.ok) {
@@ -242,7 +259,9 @@ export const api = {
    * List council presets.
    */
   async listCouncilPresets() {
-    const response = await fetch(`${API_BASE}/api/settings/council/presets`);
+    const response = await fetch(`${API_BASE}/api/settings/council/presets`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to load council presets');
     }
@@ -255,9 +274,9 @@ export const api = {
   async saveCouncilPreset(name, settings) {
     const response = await fetch(`${API_BASE}/api/settings/council/presets`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({ name, settings }),
     });
     if (!response.ok) {
@@ -273,9 +292,9 @@ export const api = {
   async applyCouncilPreset(presetId) {
     const response = await fetch(`${API_BASE}/api/settings/council/presets/apply`, {
       method: 'POST',
-      headers: {
+      headers: withAuth({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({ preset_id: presetId }),
     });
     if (!response.ok) {
@@ -291,6 +310,7 @@ export const api = {
   async deleteCouncilPreset(presetId) {
     const response = await fetch(`${API_BASE}/api/settings/council/presets/${presetId}`, {
       method: 'DELETE',
+      headers: withAuth(),
     });
     if (!response.ok) {
       const errorText = await response.text();
@@ -303,7 +323,9 @@ export const api = {
    * List Bedrock Converse-capable models for the current region.
    */
   async listBedrockModels() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-models`);
+    const response = await fetch(`${API_BASE}/api/settings/bedrock-models`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to load Bedrock models');
     }
@@ -318,6 +340,7 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/message/cancel`,
       {
         method: 'POST',
+        headers: withAuth(),
       }
     );
     if (!response.ok) {
