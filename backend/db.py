@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import hashlib
+import hmac
+import secrets
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -299,3 +302,38 @@ def with_connection() -> Iterator[sqlite3.Connection]:
 def check_db() -> None:
     with with_connection() as conn:
         conn.execute("SELECT 1").fetchone()
+
+
+def has_auth_pin() -> bool:
+    with with_connection() as conn:
+        return _meta_get(conn, "auth_pin") is not None
+
+
+def set_auth_pin(pin: str) -> None:
+    salt = secrets.token_bytes(16)
+    iterations = 120_000
+    digest = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, iterations)
+    stored = f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
+    with with_connection() as conn:
+        _meta_set(conn, "auth_pin", stored)
+        conn.commit()
+
+
+def verify_auth_pin(pin: str) -> bool:
+    with with_connection() as conn:
+        stored = _meta_get(conn, "auth_pin")
+        if not stored:
+            return False
+
+    try:
+        scheme, iterations_str, salt_hex, digest_hex = stored.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        iterations = int(iterations_str)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(digest_hex)
+    except Exception:
+        return False
+
+    computed = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(expected, computed)

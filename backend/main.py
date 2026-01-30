@@ -8,7 +8,6 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
-import os
 
 from . import storage
 from . import db
@@ -34,7 +33,6 @@ from .council_presets import (
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
-API_ACCESS_KEY = os.getenv("LLM_COUNCIL_ACCESS_KEY", "").strip()
 
 # Track active streaming tasks so they can be cancelled from the UI.
 ACTIVE_STREAMS: Dict[str, Dict[str, Any]] = {}
@@ -49,12 +47,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Simple shared-key gate for frontend-only access.
+# PIN gate. If no PIN exists, only allow setup + status endpoints.
 @app.middleware("http")
-async def _require_access_key(request: Request, call_next):
-    if API_ACCESS_KEY and request.url.path.startswith("/api"):
-        supplied = request.headers.get("x-llm-council-key", "")
-        if supplied != API_ACCESS_KEY:
+async def _require_pin(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if request.url.path.startswith("/api"):
+        if request.url.path in {"/api/auth/status", "/api/auth/setup"}:
+            return await call_next(request)
+
+        if not db.has_auth_pin():
+            return JSONResponse(status_code=401, content={"detail": "PIN_REQUIRED"})
+
+        supplied = request.headers.get("x-llm-council-pin", "")
+        if not supplied or not db.verify_auth_pin(supplied):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
@@ -77,6 +83,11 @@ class UpdateBedrockTokenRequest(BaseModel):
 class UpdateBedrockRegionRequest(BaseModel):
     """Request to update the Bedrock region at runtime."""
     region: str
+
+
+class AuthPinRequest(BaseModel):
+    """Request to set the access PIN."""
+    pin: str
 
 
 MAX_SYSTEM_PROMPT_CHARS = 4000
@@ -127,6 +138,26 @@ class Conversation(BaseModel):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Return whether a PIN is configured."""
+    return {"has_pin": db.has_auth_pin()}
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(request: AuthPinRequest):
+    """Set the access PIN if none exists."""
+    pin = request.pin.strip()
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN is required")
+    if len(pin) < 4:
+        raise HTTPException(status_code=400, detail="PIN must be at least 4 characters")
+    if db.has_auth_pin():
+        raise HTTPException(status_code=409, detail="PIN already set")
+    db.set_auth_pin(pin)
+    return {"status": "ok", "has_pin": True}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])

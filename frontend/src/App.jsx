@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
-import { api } from './api';
+import { api, setAccessKey, clearAccessKey } from './api';
+import logoMark from './assets/NetZero2050-logo.svg';
 import './App.css';
 
 function App() {
@@ -13,12 +14,30 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [hasPin, setHasPin] = useState(false);
+  const [accessKeyPresent, setAccessKeyPresent] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isSettingPin, setIsSettingPin] = useState(false);
   const deleteTimerRef = useRef(null);
   const deleteIntervalRef = useRef(null);
 
   // Load conversations on mount
   useEffect(() => {
-    loadConversations();
+    const bootstrapAuth = async () => {
+      try {
+        clearAccessKey();
+        setAccessKeyPresent(false);
+        const status = await api.getAuthStatus();
+        setHasPin(Boolean(status.has_pin));
+      } catch (error) {
+        console.error('Failed to load auth status:', error);
+      } finally {
+        setAuthChecked(true);
+      }
+    };
+    bootstrapAuth();
   }, []);
 
   // Load conversation details when selected
@@ -28,12 +47,28 @@ function App() {
     }
   }, [currentConversationId]);
 
+  useEffect(() => {
+    if (!authChecked) return;
+    if (hasPin && accessKeyPresent) {
+      loadConversations();
+    }
+  }, [authChecked, hasPin, accessKeyPresent]);
+
   const loadConversations = async () => {
     try {
       const convs = await api.listConversations();
       setConversations(convs);
     } catch (error) {
-      console.error('Failed to load conversations:', error);
+      if (error.message === 'Unauthorized') {
+        clearAccessKey();
+        setAccessKeyPresent(false);
+        setPinError('Invalid PIN. Please try again.');
+        setConversations([]);
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      } else {
+        console.error('Failed to load conversations:', error);
+      }
     }
   };
 
@@ -345,6 +380,40 @@ function App() {
     }
   };
 
+  const handlePinSubmit = async (event) => {
+    event.preventDefault();
+    const trimmed = pinInput.trim();
+    if (!trimmed) {
+      setPinError('PIN is required.');
+      return;
+    }
+
+    setPinError('');
+    if (!hasPin) {
+      try {
+        setIsSettingPin(true);
+        await api.setupAuthPin(trimmed);
+        setAccessKey(trimmed);
+        setAccessKeyPresent(true);
+        setHasPin(true);
+        setPinInput('');
+        loadConversations();
+      } catch (error) {
+        setPinError(error.message || 'Failed to set PIN.');
+      } finally {
+        setIsSettingPin(false);
+      }
+      return;
+    }
+
+    setAccessKey(trimmed);
+    setAccessKeyPresent(true);
+    setPinInput('');
+    loadConversations();
+  };
+
+  const isAuthorized = authChecked && (hasPin ? accessKeyPresent : false);
+
   return (
     <div className={`app app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-panel">
@@ -363,6 +432,7 @@ function App() {
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
+          accessKeyReady={authChecked && (hasPin ? isAuthorized : false)}
         />
       </div>
       <div className="chat-panel">
@@ -390,6 +460,50 @@ function App() {
         aria-hidden={!isSidebarOpen}
         tabIndex={isSidebarOpen ? 0 : -1}
       />
+      {!authChecked && (
+        <div className="pin-backdrop">
+          <div className="pin-modal">
+            <div className="pin-title">Checking access…</div>
+            <div className="pin-subtitle">Preparing secure session.</div>
+          </div>
+        </div>
+      )}
+      {authChecked && (!hasPin || !isAuthorized) && (
+        <div className="pin-backdrop">
+          <form className="pin-modal" onSubmit={handlePinSubmit}>
+            <div className="pin-header">
+              <div className="pin-logo">
+                <img src={logoMark} alt="" />
+              </div>
+              <div>
+                <div className="pin-title">
+                  {hasPin ? 'Enter Access PIN' : 'Set Access PIN'}
+                </div>
+                <div className="pin-subtitle">
+                  {hasPin
+                    ? 'This app requires a PIN to continue.'
+                    : 'Create a PIN to protect access to the backend.'}
+                </div>
+              </div>
+            </div>
+            <input
+              type="password"
+              className="pin-input"
+              placeholder="PIN"
+              value={pinInput}
+              onChange={(event) => setPinInput(event.target.value)}
+              autoFocus
+            />
+            {pinError && <div className="pin-error">{pinError}</div>}
+            <div className="pin-hint">
+              {hasPin ? 'PINs are stored securely (hashed) in the database.' : 'Choose at least 4 characters.'}
+            </div>
+            <button type="submit" className="pin-submit" disabled={isSettingPin}>
+              {isSettingPin ? 'Saving...' : 'Continue'}
+            </button>
+          </form>
+        </div>
+      )}
       {pendingDelete && (
         <div className="undo-toast">
           <div className="undo-message">

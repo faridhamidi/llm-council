@@ -5,14 +5,60 @@
 const API_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
 const API_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 const API_BASE = `${API_PROTOCOL}//${API_HOST}:8001`;
-const ACCESS_KEY = import.meta.env.VITE_LLM_COUNCIL_ACCESS_KEY || '';
 
-const withAuth = (headers = {}) => ({
-  ...headers,
-  ...(ACCESS_KEY ? { 'x-llm-council-key': ACCESS_KEY } : {}),
-});
+let accessKey = '';
+
+const getAccessKey = () => accessKey || '';
+
+export const setAccessKey = (value) => {
+  const trimmed = (value || '').trim();
+  if (trimmed) {
+    accessKey = trimmed;
+  }
+};
+
+export const clearAccessKey = () => {
+  accessKey = '';
+};
+
+const withAuth = (headers = {}) => {
+  const accessKey = getAccessKey();
+  return {
+    ...headers,
+    ...(accessKey ? { 'x-llm-council-pin': accessKey } : {}),
+  };
+};
 
 export const api = {
+  /**
+   * Auth status.
+   */
+  async getAuthStatus() {
+    const response = await fetch(`${API_BASE}/api/auth/status`);
+    if (!response.ok) {
+      throw new Error('Failed to load auth status');
+    }
+    return response.json();
+  },
+
+  /**
+   * Set PIN (first-time setup).
+   */
+  async setupAuthPin(pin) {
+    const response = await fetch(`${API_BASE}/api/auth/setup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ pin }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to set PIN');
+    }
+    return response.json();
+  },
+
   /**
    * List all conversations.
    */
@@ -20,6 +66,9 @@ export const api = {
     const response = await fetch(`${API_BASE}/api/conversations`, {
       headers: withAuth(),
     });
+    if (response.status === 401) {
+      throw new Error('Unauthorized');
+    }
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -299,7 +348,7 @@ export const api = {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(errorText || 'Failed to apply council preset');
+      throw new Error(errorText || 'Failed to apply preset');
     }
     return response.json();
   },
@@ -314,7 +363,7 @@ export const api = {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(errorText || 'Failed to delete council preset');
+      throw new Error(errorText || 'Failed to delete preset');
     }
     return response.json();
   },

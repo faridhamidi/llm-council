@@ -9,6 +9,7 @@ export default function Sidebar({
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  accessKeyReady = true,
 }) {
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
@@ -54,6 +55,7 @@ export default function Sidebar({
   };
 
   useEffect(() => {
+    if (!accessKeyReady) return;
     let isMounted = true;
     const loadRegions = async () => {
       try {
@@ -72,7 +74,7 @@ export default function Sidebar({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [accessKeyReady]);
 
   useEffect(() => {
     const isAnyModalOpen = isTokenModalOpen || isCouncilModalOpen;
