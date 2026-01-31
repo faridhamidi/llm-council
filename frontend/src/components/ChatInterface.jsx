@@ -6,6 +6,44 @@ import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
 
+function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', className }) {
+  const [copied, setCopied] = useState(false);
+  const hasText = Boolean(text);
+
+  const handleCopy = async () => {
+    if (!hasText) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy message:', error);
+    }
+  };
+
+  return (
+    <button
+      className={className}
+      onClick={handleCopy}
+      disabled={!hasText}
+    >
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}
+
 export default function ChatInterface({
   conversation,
   onSendMessage,
@@ -82,7 +120,10 @@ export default function ChatInterface({
             <div key={index} className="message-group">
               {msg.role === 'user' ? (
                 <div className="user-message">
-                  <div className="message-label">You</div>
+                  <div className="message-header">
+                    <div className="message-label">You</div>
+                    <CopyButton text={msg.content} className="copy-message-btn" />
+                  </div>
                   <div className="message-content">
                     <div className="markdown-content">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>

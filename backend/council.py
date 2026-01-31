@@ -49,7 +49,7 @@ def _council_config() -> Tuple[
     )
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(user_query: str, api_key: str | None = None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
@@ -68,6 +68,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
             member["model_id"],
             messages,
             system_prompt=member.get("system_prompt", ""),
+            api_key=api_key,
         )
         for member in members
     ]
@@ -99,7 +100,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    api_key: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -181,6 +183,7 @@ Now provide your evaluation and ranking:"""
             member["model_id"],
             messages,
             system_prompt=member.get("system_prompt", "") if use_stage2_prompt else None,
+            api_key=api_key,
         )
         for member in members
     ]
@@ -204,7 +207,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    api_key: str | None = None,
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -265,7 +269,8 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     response = await query_model(
         chairman_model_id,
         messages,
-        system_prompt=chairman_prompt_text if use_stage3_prompt else None
+        system_prompt=chairman_prompt_text if use_stage3_prompt else None,
+        api_key=api_key,
     )
 
     if response is None or not response.get("content"):
@@ -362,7 +367,7 @@ def calculate_aggregate_rankings(
     return aggregate
 
 
-async def generate_conversation_title(user_query: str) -> str:
+async def generate_conversation_title(user_query: str, api_key: str | None = None) -> str:
     """
     Generate a short title for a conversation based on the first user message.
 
@@ -384,7 +389,7 @@ Title:"""
     # Use gemini-2.5-flash for title generation (fast and cheap)
     members, _, chairman_model_id, _, title_model_id, _, _ = _council_config()
     fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
-    response = await query_model(title_model_id or fallback_model, messages, timeout=30.0)
+    response = await query_model(title_model_id or fallback_model, messages, timeout=30.0, api_key=api_key)
 
     if response is None or not response.get("content"):
         # Fallback to a generic title
@@ -402,7 +407,7 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, api_key: str | None = None) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
@@ -413,7 +418,7 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, api_key=api_key)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -423,7 +428,7 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results, api_key=api_key)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -432,7 +437,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        api_key=api_key,
     )
 
     # Prepare metadata

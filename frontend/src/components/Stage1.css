@@ -59,11 +59,37 @@
   border: 1px solid var(--border-primary);
 }
 
+.tab-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
 .model-name {
   color: var(--text-tertiary);
   font-size: 12px;
-  margin-bottom: 12px;
   font-family: var(--font-mono);
+  margin: 0;
+}
+
+.copy-stage-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(62, 207, 142, 0.4);
+  background: rgba(62, 207, 142, 0.12);
+  color: var(--accent-green-light);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-stage-btn:hover {
+  background: rgba(62, 207, 142, 0.22);
+  border-color: var(--accent-green);
+  box-shadow: 0 0 14px var(--glow);
 }
 
 .system-prompt-warning {
@@ -107,6 +133,10 @@
   }
 
   .model-name {
+    font-size: 11px;
+  }
+
+  .copy-stage-btn {
     font-size: 11px;
   }
 

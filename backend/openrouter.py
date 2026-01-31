@@ -9,7 +9,8 @@ async def query_model(
     model: str,
     messages: List[Dict[str, str]],
     timeout: float = 120.0,
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Query a single model via Bedrock Runtime Converse API.
@@ -22,7 +23,7 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
-    bedrock_api_key = get_bedrock_api_key()
+    bedrock_api_key = api_key or get_bedrock_api_key()
     if not bedrock_api_key:
         print("Error: BEDROCK_API_KEY (or AWS_BEARER_TOKEN_BEDROCK) is not set.")
         return None
@@ -101,7 +102,8 @@ async def query_model(
 async def query_models_parallel(
     models: List[str],
     messages: List[Dict[str, str]],
-    system_prompts: Optional[Dict[str, str]] = None
+    system_prompts: Optional[Dict[str, str]] = None,
+    api_key: Optional[str] = None,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """
     Query multiple models in parallel.
@@ -117,7 +119,12 @@ async def query_models_parallel(
 
     # Create tasks for all models
     tasks = [
-        query_model(model, messages, system_prompt=(system_prompts or {}).get(model))
+        query_model(
+            model,
+            messages,
+            system_prompt=(system_prompts or {}).get(model),
+            api_key=api_key,
+        )
         for model in models
     ]
 

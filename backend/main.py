@@ -8,11 +8,12 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import os
 
 from . import storage
 from . import db
+from . import session_store
 from .config import (
-    set_bedrock_api_key,
     get_bedrock_region,
     set_bedrock_region,
     BEDROCK_REGION_OPTIONS,
@@ -33,6 +34,7 @@ from .council_presets import (
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
+DISABLE_APP_PIN = os.getenv("DISABLE_APP_PIN", "").lower() in {"1", "true", "yes"}
 
 # Track active streaming tasks so they can be cancelled from the UI.
 ACTIVE_STREAMS: Dict[str, Dict[str, Any]] = {}
@@ -41,7 +43,7 @@ ACTIVE_STREAMS: Dict[str, Dict[str, Any]] = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_origin_regex=r"^http://.*:(5173|3000)$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^http://.*:(5173|3000)$|^https://.*\.trycloudflare\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,7 +51,28 @@ app.add_middleware(
 
 # PIN gate. If no PIN exists, only allow setup + status endpoints.
 @app.middleware("http")
+async def _session_middleware(request: Request, call_next):
+    session_id, is_new = session_store.ensure_session(
+        request.cookies.get(session_store.SESSION_COOKIE_NAME)
+    )
+    request.state.session_id = session_id
+    response = await call_next(request)
+    if is_new:
+        is_https = request.url.scheme == "https"
+        response.set_cookie(
+            session_store.SESSION_COOKIE_NAME,
+            session_id,
+            httponly=True,
+            samesite="None" if is_https else "Lax",
+            secure=is_https,
+        )
+    return response
+
+
+@app.middleware("http")
 async def _require_pin(request: Request, call_next):
+    if DISABLE_APP_PIN:
+        return await call_next(request)
     if request.method == "OPTIONS":
         return await call_next(request)
     if request.url.path.startswith("/api"):
@@ -143,12 +166,16 @@ async def root():
 @app.get("/api/auth/status")
 async def auth_status():
     """Return whether a PIN is configured."""
-    return {"has_pin": db.has_auth_pin()}
+    if DISABLE_APP_PIN:
+        return {"has_pin": False, "disabled": True}
+    return {"has_pin": db.has_auth_pin(), "disabled": False}
 
 
 @app.post("/api/auth/setup")
 async def auth_setup(request: AuthPinRequest):
     """Set the access PIN if none exists."""
+    if DISABLE_APP_PIN:
+        raise HTTPException(status_code=400, detail="PIN is disabled")
     pin = request.pin.strip()
     if not pin:
         raise HTTPException(status_code=400, detail="PIN is required")
@@ -203,7 +230,7 @@ async def restore_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
+async def send_message(conversation_id: str, payload: SendMessageRequest, http_request: Request):
     """
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
@@ -217,16 +244,22 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    storage.add_user_message(conversation_id, payload.content)
 
     # If this is the first message, generate a title
     if is_first_message:
-        title = await generate_conversation_title(request.content)
+        title = await generate_conversation_title(payload.content)
         storage.update_conversation_title(conversation_id, title)
+
+    session_id = http_request.state.session_id
+    bedrock_key = session_store.get_bedrock_key(session_id)
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        payload.content,
+        api_key=bedrock_key,
     )
 
     # Add assistant message with all stages
@@ -247,15 +280,16 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
 
 @app.post("/api/settings/bedrock-token")
-async def update_bedrock_token(request: UpdateBedrockTokenRequest):
+async def update_bedrock_token(payload: UpdateBedrockTokenRequest, http_request: Request):
     """
     Update the Bedrock API key at runtime (in-memory only).
     """
-    token = request.token.strip()
+    token = payload.token.strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token is required")
 
-    set_bedrock_api_key(token)
+    session_id = http_request.state.session_id
+    session_store.set_bedrock_key(session_id, token)
     return {"status": "ok"}
 
 
@@ -425,6 +459,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    session_id = http_request.state.session_id
+    bedrock_key = session_store.get_bedrock_key(session_id)
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
+
     async def stream_worker(event_queue: "asyncio.Queue[Dict[str, Any]]", cancel_event: asyncio.Event):
         try:
             if cancel_event.is_set():
@@ -437,11 +476,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
             # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+                title_task = asyncio.create_task(generate_conversation_title(request.content, api_key=bedrock_key))
 
             # Stage 1: Collect responses
             await event_queue.put({"type": "stage1_start"})
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(request.content, api_key=bedrock_key)
             await event_queue.put({"type": "stage1_complete", "data": stage1_results})
 
             if cancel_event.is_set():
@@ -450,7 +489,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
 
             # Stage 2: Collect rankings
             await event_queue.put({"type": "stage2_start"})
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(
+                request.content,
+                stage1_results,
+                api_key=bedrock_key,
+            )
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             await event_queue.put({
                 "type": "stage2_complete",
@@ -467,7 +510,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
 
             # Stage 3: Synthesize final answer
             await event_queue.put({"type": "stage3_start"})
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(
+                request.content,
+                stage1_results,
+                stage2_results,
+                api_key=bedrock_key,
+            )
             await event_queue.put({"type": "stage3_complete", "data": stage3_result})
 
             if cancel_event.is_set():

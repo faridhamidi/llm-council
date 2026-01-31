@@ -1,0 +1,10 @@
+tunnel: 67532731-e347-49cd-b5a4-5a49afcfebbf
+credentials-file: /Users/faridnordin/.cloudflared/67532731-e347-49cd-b5a4-5a49afcfebbf.json
+
+ingress:
+  - hostname: council.farid-puppeteer-anarobic-mental.cc
+    path: /api
+    service: http://localhost:8001
+  - hostname: council.farid-puppeteer-anarobic-mental.cc
+    service: http://localhost:5173
+  - service: http_status:404

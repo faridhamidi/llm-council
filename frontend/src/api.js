@@ -2,13 +2,73 @@
  * API client for the LLM Council backend.
  */
 
-const API_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-const API_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `${API_PROTOCOL}//${API_HOST}:8001`;
+const isBrowser = typeof window !== 'undefined';
+const hostname = isBrowser ? window.location.hostname : '';
+const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
 
-let accessKey = '';
+const rawEnvBase = import.meta.env.VITE_API_BASE || '';
+const normalizeBase = (value) => (value || '').replace(/\/$/, '');
+
+const CANDIDATE_BASES = [];
+if (rawEnvBase) CANDIDATE_BASES.push(normalizeBase(rawEnvBase));
+if (isLocalHost) CANDIDATE_BASES.push('http://localhost:8001');
+CANDIDATE_BASES.push('');
+
+const STATUS_PATH = '/api/auth/status';
+let resolvedBase = null;
+let resolving = null;
+
+const withTimeout = (promise, ms) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+
+const isReachable = async (base) => {
+  try {
+    const response = await withTimeout(
+      fetch(`${base}${STATUS_PATH}`, {
+        method: 'GET',
+        credentials: 'include',
+      }),
+      2500
+    );
+    return response.status === 200 || response.status === 401 || response.status === 403;
+  } catch (error) {
+    return false;
+  }
+};
+
+const resolveApiBase = async () => {
+  if (resolvedBase !== null) return resolvedBase;
+  if (resolving) return resolving;
+
+  resolving = (async () => {
+    for (const base of CANDIDATE_BASES) {
+      if (await isReachable(base)) {
+        resolvedBase = base;
+        resolving = null;
+        return base;
+      }
+    }
+    resolvedBase = CANDIDATE_BASES[0] || '';
+    resolving = null;
+    return resolvedBase;
+  })();
+
+  return resolving;
+};
 
 const getAccessKey = () => accessKey || '';
+let accessKey = '';
 
 export const setAccessKey = (value) => {
   const trimmed = (value || '').trim();
@@ -22,11 +82,19 @@ export const clearAccessKey = () => {
 };
 
 const withAuth = (headers = {}) => {
-  const accessKey = getAccessKey();
+  const key = getAccessKey();
   return {
     ...headers,
-    ...(accessKey ? { 'x-llm-council-pin': accessKey } : {}),
+    ...(key ? { 'x-llm-council-pin': key } : {}),
   };
+};
+
+const apiFetch = async (path, options = {}) => {
+  const base = await resolveApiBase();
+  return fetch(`${base}${path}`, {
+    ...options,
+    credentials: 'include',
+  });
 };
 
 export const api = {
@@ -34,7 +102,7 @@ export const api = {
    * Auth status.
    */
   async getAuthStatus() {
-    const response = await fetch(`${API_BASE}/api/auth/status`);
+    const response = await apiFetch(STATUS_PATH);
     if (!response.ok) {
       throw new Error('Failed to load auth status');
     }
@@ -45,7 +113,7 @@ export const api = {
    * Set PIN (first-time setup).
    */
   async setupAuthPin(pin) {
-    const response = await fetch(`${API_BASE}/api/auth/setup`, {
+    const response = await apiFetch('/api/auth/setup', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -63,7 +131,7 @@ export const api = {
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`, {
+    const response = await apiFetch('/api/conversations', {
       headers: withAuth(),
     });
     if (response.status === 401) {
@@ -79,7 +147,7 @@ export const api = {
    * Create a new conversation.
    */
   async createConversation() {
-    const response = await fetch(`${API_BASE}/api/conversations`, {
+    const response = await apiFetch('/api/conversations', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -96,10 +164,9 @@ export const api = {
    * Get a specific conversation.
    */
   async getConversation(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`,
-      { headers: withAuth() }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}`, {
+      headers: withAuth(),
+    });
     if (!response.ok) {
       throw new Error('Failed to get conversation');
     }
@@ -110,13 +177,10 @@ export const api = {
    * Delete a conversation (soft-delete).
    */
   async deleteConversation(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`,
-      {
-        method: 'DELETE',
-        headers: withAuth(),
-      }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}`, {
+      method: 'DELETE',
+      headers: withAuth(),
+    });
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to delete conversation');
@@ -128,13 +192,10 @@ export const api = {
    * Restore a deleted conversation.
    */
   async restoreConversation(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/restore`,
-      {
-        method: 'POST',
-        headers: withAuth(),
-      }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}/restore`, {
+      method: 'POST',
+      headers: withAuth(),
+    });
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to restore conversation');
@@ -146,16 +207,13 @@ export const api = {
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message`,
-      {
-        method: 'POST',
-        headers: withAuth({
-          'Content-Type': 'application/json',
-        }),
-        body: JSON.stringify({ content }),
-      }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}/message`, {
+      method: 'POST',
+      headers: withAuth({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ content }),
+    });
     if (!response.ok) {
       throw new Error('Failed to send message');
     }
@@ -171,17 +229,14 @@ export const api = {
    */
   async sendMessageStream(conversationId, content, onEvent, options = {}) {
     const { signal } = options;
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: withAuth({
-          'Content-Type': 'application/json',
-        }),
-        signal,
-        body: JSON.stringify({ content }),
-      }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}/message/stream`, {
+      method: 'POST',
+      headers: withAuth({
+        'Content-Type': 'application/json',
+      }),
+      signal,
+      body: JSON.stringify({ content }),
+    });
 
     if (!response.ok) {
       throw new Error('Failed to send message');
@@ -215,7 +270,7 @@ export const api = {
    * Update the Bedrock API token at runtime.
    */
   async updateBedrockToken(token) {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-token`, {
+    const response = await apiFetch('/api/settings/bedrock-token', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -233,7 +288,7 @@ export const api = {
    * Get current Bedrock region.
    */
   async getBedrockRegion() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`, {
+    const response = await apiFetch('/api/settings/bedrock-region', {
       headers: withAuth(),
     });
     if (!response.ok) {
@@ -246,7 +301,7 @@ export const api = {
    * List Bedrock region options.
    */
   async listBedrockRegions() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-region/options`, {
+    const response = await apiFetch('/api/settings/bedrock-region/options', {
       headers: withAuth(),
     });
     if (!response.ok) {
@@ -259,7 +314,7 @@ export const api = {
    * Update the Bedrock region at runtime.
    */
   async updateBedrockRegion(region) {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-region`, {
+    const response = await apiFetch('/api/settings/bedrock-region', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -277,7 +332,7 @@ export const api = {
    * Get council settings.
    */
   async getCouncilSettings() {
-    const response = await fetch(`${API_BASE}/api/settings/council`, {
+    const response = await apiFetch('/api/settings/council', {
       headers: withAuth(),
     });
     if (!response.ok) {
@@ -290,7 +345,7 @@ export const api = {
    * Update council settings.
    */
   async updateCouncilSettings(settings) {
-    const response = await fetch(`${API_BASE}/api/settings/council`, {
+    const response = await apiFetch('/api/settings/council', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -308,7 +363,7 @@ export const api = {
    * List council presets.
    */
   async listCouncilPresets() {
-    const response = await fetch(`${API_BASE}/api/settings/council/presets`, {
+    const response = await apiFetch('/api/settings/council/presets', {
       headers: withAuth(),
     });
     if (!response.ok) {
@@ -321,7 +376,7 @@ export const api = {
    * Save a council preset.
    */
   async saveCouncilPreset(name, settings) {
-    const response = await fetch(`${API_BASE}/api/settings/council/presets`, {
+    const response = await apiFetch('/api/settings/council/presets', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -339,7 +394,7 @@ export const api = {
    * Apply a council preset.
    */
   async applyCouncilPreset(presetId) {
-    const response = await fetch(`${API_BASE}/api/settings/council/presets/apply`, {
+    const response = await apiFetch('/api/settings/council/presets/apply', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
@@ -357,7 +412,7 @@ export const api = {
    * Delete a council preset.
    */
   async deleteCouncilPreset(presetId) {
-    const response = await fetch(`${API_BASE}/api/settings/council/presets/${presetId}`, {
+    const response = await apiFetch(`/api/settings/council/presets/${presetId}`, {
       method: 'DELETE',
       headers: withAuth(),
     });
@@ -372,7 +427,7 @@ export const api = {
    * List Bedrock Converse-capable models for the current region.
    */
   async listBedrockModels() {
-    const response = await fetch(`${API_BASE}/api/settings/bedrock-models`, {
+    const response = await apiFetch('/api/settings/bedrock-models', {
       headers: withAuth(),
     });
     if (!response.ok) {
@@ -385,13 +440,10 @@ export const api = {
    * Cancel an active streaming message for a conversation.
    */
   async cancelMessageStream(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/cancel`,
-      {
-        method: 'POST',
-        headers: withAuth(),
-      }
-    );
+    const response = await apiFetch(`/api/conversations/${conversationId}/message/cancel`, {
+      method: 'POST',
+      headers: withAuth(),
+    });
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to cancel stream');

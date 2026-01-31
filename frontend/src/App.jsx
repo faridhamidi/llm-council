@@ -9,8 +9,8 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [streamController, setStreamController] = useState(null);
+  const [streamingConversationId, setStreamingConversationId] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -20,8 +20,19 @@ function App() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isSettingPin, setIsSettingPin] = useState(false);
+  const conversationCacheRef = useRef({});
+  const currentConversationIdRef = useRef(null);
+  const currentConversationRef = useRef(null);
   const deleteTimerRef = useRef(null);
   const deleteIntervalRef = useRef(null);
+
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
+
+  useEffect(() => {
+    currentConversationRef.current = currentConversation;
+  }, [currentConversation]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -31,6 +42,9 @@ function App() {
         setAccessKeyPresent(false);
         const status = await api.getAuthStatus();
         setHasPin(Boolean(status.has_pin));
+        if (!status.has_pin) {
+          loadConversations();
+        }
       } catch (error) {
         console.error('Failed to load auth status:', error);
       } finally {
@@ -73,12 +87,43 @@ function App() {
   };
 
   const loadConversation = async (id) => {
+    const cached = conversationCacheRef.current[id];
+    if (cached && streamingConversationId === id) {
+      setCurrentConversation(cached);
+      return;
+    }
     try {
       const conv = await api.getConversation(id);
+      conversationCacheRef.current[id] = conv;
       setCurrentConversation(conv);
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
+  };
+
+  const updateConversationById = (id, updater) => {
+    const cached = conversationCacheRef.current[id];
+    const base = cached || (currentConversationIdRef.current === id
+      ? currentConversationRef.current
+      : null);
+    if (!base) return;
+    const next = updater(base);
+    conversationCacheRef.current[id] = next;
+    if (currentConversationIdRef.current === id) {
+      setCurrentConversation(next);
+    }
+  };
+
+  const updateLastAssistantMessage = (conversation, updater) => {
+    if (!conversation?.messages?.length) return conversation;
+    const messages = [...conversation.messages];
+    const last = messages[messages.length - 1];
+    const nextLast = updater({
+      ...last,
+      loading: last?.loading ? { ...last.loading } : undefined,
+    });
+    messages[messages.length - 1] = nextLast;
+    return { ...conversation, messages };
   };
 
   const clearDeleteTimers = () => {
@@ -103,6 +148,11 @@ function App() {
     setUndoSecondsLeft(10);
 
     setConversations((prev) => prev.filter((conv) => conv.id !== id));
+    if (conversationCacheRef.current[id]) {
+      const nextCache = { ...conversationCacheRef.current };
+      delete nextCache[id];
+      conversationCacheRef.current = nextCache;
+    }
     if (currentConversationId === id) {
       setCurrentConversationId(null);
       setCurrentConversation(null);
@@ -209,18 +259,13 @@ function App() {
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 
-    setIsLoading(true);
+    const targetConversationId = currentConversationId;
+    setStreamingConversationId(targetConversationId);
     const controller = new AbortController();
     setStreamController(controller);
     try {
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      }));
-
-      // Create a partial assistant message that will be updated progressively
       const assistantMessage = {
         role: 'assistant',
         stage1: null,
@@ -233,75 +278,85 @@ function App() {
           stage3: false,
         },
       };
-
-      // Add the partial assistant message
-      setCurrentConversation((prev) => ({
+      updateConversationById(targetConversationId, (prev) => ({
         ...prev,
-        messages: [...prev.messages, assistantMessage],
+        messages: [...prev.messages, userMessage, assistantMessage],
       }));
 
       // Send message with streaming
       await api.sendMessageStream(
-        currentConversationId,
+        targetConversationId,
         content,
         (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage1 = true;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                lastMsg.stage1 = event.data;
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage1 = false;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage2 = true;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                lastMsg.stage2 = event.data;
+                lastMsg.metadata = event.metadata;
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage2 = false;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage3 = true;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                lastMsg.stage3 = event.data;
+                if (lastMsg.loading) {
+                  lastMsg.loading.stage3 = false;
+                }
+                return lastMsg;
+              })
+            );
             break;
 
           case 'title_complete':
@@ -312,29 +367,28 @@ function App() {
           case 'complete':
             // Stream complete, reload conversations list
             loadConversations();
-            setIsLoading(false);
             setStreamController(null);
+            setStreamingConversationId(null);
             break;
 
           case 'error':
             console.error('Stream error:', event.message);
-            setIsLoading(false);
             setStreamController(null);
+            setStreamingConversationId(null);
             break;
           case 'cancelled':
-            setCurrentConversation((prev) => {
-              if (!prev?.messages?.length) return prev;
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              if (lastMsg?.loading) {
-                lastMsg.loading.stage1 = false;
-                lastMsg.loading.stage2 = false;
-                lastMsg.loading.stage3 = false;
-              }
-              return { ...prev, messages };
-            });
-            setIsLoading(false);
+            updateConversationById(targetConversationId, (prev) =>
+              updateLastAssistantMessage(prev, (lastMsg) => {
+                if (lastMsg?.loading) {
+                  lastMsg.loading.stage1 = false;
+                  lastMsg.loading.stage2 = false;
+                  lastMsg.loading.stage3 = false;
+                }
+                return lastMsg;
+              })
+            );
             setStreamController(null);
+            setStreamingConversationId(null);
             break;
 
           default:
@@ -345,27 +399,26 @@ function App() {
       );
     } catch (error) {
       if (error.name === 'AbortError') {
-        setCurrentConversation((prev) => {
-          if (!prev?.messages?.length) return prev;
-          const messages = [...prev.messages];
-          const lastMsg = messages[messages.length - 1];
-          if (lastMsg?.loading) {
-            lastMsg.loading.stage1 = false;
-            lastMsg.loading.stage2 = false;
-            lastMsg.loading.stage3 = false;
-          }
-          return { ...prev, messages };
-        });
+        updateConversationById(targetConversationId, (prev) =>
+          updateLastAssistantMessage(prev, (lastMsg) => {
+            if (lastMsg?.loading) {
+              lastMsg.loading.stage1 = false;
+              lastMsg.loading.stage2 = false;
+              lastMsg.loading.stage3 = false;
+            }
+            return lastMsg;
+          })
+        );
       } else {
         console.error('Failed to send message:', error);
         // Remove optimistic messages on error
-        setCurrentConversation((prev) => ({
+        updateConversationById(targetConversationId, (prev) => ({
           ...prev,
           messages: prev.messages.slice(0, -2),
         }));
       }
-      setIsLoading(false);
       setStreamController(null);
+      setStreamingConversationId(null);
     }
   };
 
@@ -373,8 +426,8 @@ function App() {
     if (streamController) {
       streamController.abort();
     }
-    if (currentConversationId) {
-      api.cancelMessageStream(currentConversationId).catch((error) => {
+    if (streamingConversationId) {
+      api.cancelMessageStream(streamingConversationId).catch((error) => {
         console.error('Failed to cancel stream:', error);
       });
     }
@@ -412,7 +465,7 @@ function App() {
     loadConversations();
   };
 
-  const isAuthorized = authChecked && (hasPin ? accessKeyPresent : false);
+  const isAuthorized = authChecked && (hasPin ? accessKeyPresent : true);
 
   return (
     <div className={`app app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
@@ -432,7 +485,7 @@ function App() {
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
-          accessKeyReady={authChecked && (hasPin ? isAuthorized : false)}
+          accessKeyReady={authChecked && (hasPin ? isAuthorized : true)}
         />
       </div>
       <div className="chat-panel">
@@ -450,7 +503,7 @@ function App() {
           conversation={currentConversation}
           onSendMessage={handleSendMessage}
           onStop={handleStop}
-          isLoading={isLoading}
+          isLoading={streamingConversationId === currentConversationId}
         />
       </div>
       <button
@@ -468,7 +521,7 @@ function App() {
           </div>
         </div>
       )}
-      {authChecked && (!hasPin || !isAuthorized) && (
+      {authChecked && hasPin && !isAuthorized && (
         <div className="pin-backdrop">
           <form className="pin-modal" onSubmit={handlePinSubmit}>
             <div className="pin-header">

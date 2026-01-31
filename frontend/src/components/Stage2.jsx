@@ -16,10 +16,49 @@ function deAnonymizeText(text, labelToModel) {
 
 export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   if (!rankings || rankings.length === 0) {
     return null;
   }
+
+  const activeRanking = rankings[activeTab];
+
+  const buildCopyText = () => {
+    if (!activeRanking) return '';
+    let text = `Evaluator: ${activeRanking.model}\n\n${deAnonymizeText(activeRanking.ranking || '', labelToModel)}`;
+    if (activeRanking.parsed_ranking && activeRanking.parsed_ranking.length > 0) {
+      const parsed = activeRanking.parsed_ranking.map((label, i) => {
+        const name = labelToModel && labelToModel[label] ? labelToModel[label] : label;
+        return `${i + 1}. ${name}`;
+      }).join('\n');
+      text += `\n\nExtracted Ranking:\n${parsed}`;
+    }
+    return text;
+  };
+
+  const handleCopy = async () => {
+    const text = buildCopyText();
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy Stage 2 output:', error);
+    }
+  };
 
   return (
     <div className="stage stage2">
@@ -36,7 +75,10 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
           <button
             key={index}
             className={`tab ${activeTab === index ? 'active' : ''}`}
-            onClick={() => setActiveTab(index)}
+            onClick={() => {
+              setActiveTab(index);
+              setCopied(false);
+            }}
           >
             {rank.model}
           </button>
@@ -44,21 +86,26 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
       </div>
 
       <div className="tab-content">
-        <div className="ranking-model">
-          {rankings[activeTab].model}
+        <div className="ranking-header">
+          <div className="ranking-model">
+            {activeRanking.model}
+          </div>
+          <button className="copy-stage-btn" onClick={handleCopy}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
         </div>
         <div className="ranking-content markdown-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {deAnonymizeText(rankings[activeTab].ranking, labelToModel)}
+            {deAnonymizeText(activeRanking.ranking, labelToModel)}
           </ReactMarkdown>
         </div>
 
-        {rankings[activeTab].parsed_ranking &&
-         rankings[activeTab].parsed_ranking.length > 0 && (
+        {activeRanking.parsed_ranking &&
+         activeRanking.parsed_ranking.length > 0 && (
           <div className="parsed-ranking">
             <strong>Extracted Ranking:</strong>
             <ol>
-              {rankings[activeTab].parsed_ranking.map((label, i) => (
+              {activeRanking.parsed_ranking.map((label, i) => (
                 <li key={i}>
                   {labelToModel && labelToModel[label]
                     ? labelToModel[label]
