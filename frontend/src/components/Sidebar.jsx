@@ -41,14 +41,14 @@ export default function Sidebar({
         name: 'Individual Responses',
         prompt: '',
         execution_mode: 'parallel',
-        member_ids: memberIds,
+        member_ids: [...memberIds],
       },
       {
         id: 'stage-2',
         name: 'Peer Rankings',
         prompt: '',
         execution_mode: 'parallel',
-        member_ids: memberIds,
+        member_ids: [...memberIds],
       },
       {
         id: 'stage-3',
@@ -68,6 +68,7 @@ export default function Sidebar({
     return {
       id: stage.id || `stage-${index + 1}`,
       name: stage.name || `Stage ${index + 1}`,
+      type: stage.type || 'ai',
       prompt: stage.prompt ?? '',
       execution_mode: stage.execution_mode === 'sequential' ? 'sequential' : 'parallel',
       member_ids: ensuredIds,
@@ -280,6 +281,20 @@ export default function Sidebar({
         member_ids: stage.member_ids.filter((id) => id !== memberId),
       }));
       return { ...prev, members: nextMembers, chairman_id: nextChairman, stages: nextStages };
+    });
+  };
+
+  const handleRemoveMemberFromStage = (stageId, memberId) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const nextStages = (prev.stages || []).map((stage) => {
+        if (stage.id !== stageId) return stage;
+        return {
+          ...stage,
+          member_ids: stage.member_ids.filter((id) => id !== memberId),
+        };
+      });
+      return { ...prev, stages: nextStages };
     });
   };
 
@@ -826,19 +841,35 @@ export default function Sidebar({
                           </div>
                           <div className="stage-header-controls">
                             <div className="stage-control-group">
-                              <label className="control-label-inline" htmlFor={`stage-${stage.id}-mode`}>
-                                Execution:
+                              <label className="control-label-inline" htmlFor={`stage-${stage.id}-type`}>
+                                Type:
                               </label>
                               <select
-                                id={`stage-${stage.id}-mode`}
+                                id={`stage-${stage.id}-type`}
                                 className="control-input-inline"
-                                value={stage.execution_mode}
-                                onChange={(event) => updateStage(stage.id, { execution_mode: event.target.value })}
+                                value={stage.type || 'ai'}
+                                onChange={(event) => updateStage(stage.id, { type: event.target.value })}
                               >
-                                <option value="parallel">Parallel</option>
-                                <option value="sequential">Sequential</option>
+                                <option value="ai">AI Council</option>
+                                <option value="human">Human Input</option>
                               </select>
                             </div>
+                            {(!stage.type || stage.type === 'ai') && (
+                              <div className="stage-control-group">
+                                <label className="control-label-inline" htmlFor={`stage-${stage.id}-mode`}>
+                                  Execution:
+                                </label>
+                                <select
+                                  id={`stage-${stage.id}-mode`}
+                                  className="control-input-inline"
+                                  value={stage.execution_mode}
+                                  onChange={(event) => updateStage(stage.id, { execution_mode: event.target.value })}
+                                >
+                                  <option value="parallel">Parallel</option>
+                                  <option value="sequential">Sequential</option>
+                                </select>
+                              </div>
+                            )}
                             <button
                               className="remove-btn"
                               onClick={() => handleRemoveStage(stage.id)}
@@ -862,116 +893,118 @@ export default function Sidebar({
                             placeholder="Optional guidance. Supports {question}, {responses}, {response_count}, {response_labels}, {stage1}, {stage2}."
                           />
                         </div>
-                        <div className="stage-members-section">
-                          <div className="stage-members-header">
-                            <span className="member-label">Members ({stage.member_ids.length} / 5)</span>
-                          </div>
-                          <div
-                            className="stage-members-grid"
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={() => handleMemberDrop(stage.id)}
-                          >
-                            {stage.member_ids.map((memberId, memberIndex) => {
-                              const member = councilSettings.members.find((entry) => entry.id === memberId);
-                              if (!member) return null;
-                              const isDragOver = dragOverMember?.stageId === stage.id && dragOverMember?.memberIndex === memberIndex;
-                              return (
-                                <div
-                                  key={memberId}
-                                  className={`member-card-inline ${draggedMember?.memberId === memberId ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.stopPropagation();
-                                    handleMemberDragStart(memberId, stage.id);
-                                  }}
-                                  onDragEnd={(e) => {
-                                    e.stopPropagation();
-                                    setDraggedMember(null);
-                                    setDragOverMember(null);
-                                  }}
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    if (draggedMember && draggedMember.stageId === stage.id && draggedMember.memberId !== memberId) {
-                                      setDragOverMember({ stageId: stage.id, memberIndex });
-                                    }
-                                  }}
-                                  onDragLeave={(e) => {
-                                    e.stopPropagation();
-                                    setDragOverMember(null);
-                                  }}
-                                  onDrop={(e) => {
-                                    e.stopPropagation();
-                                    handleMemberDrop(stage.id, memberIndex);
-                                    setDragOverMember(null);
-                                  }}
-                                >
-                                  <div className="member-card-inline-header">
-                                    <span className="member-number">{memberIndex + 1}</span>
-                                    <input
-                                      type="text"
-                                      className="member-alias-inline"
-                                      value={member.alias}
-                                      onChange={(event) => updateMember(member.id, { alias: event.target.value })}
-                                      placeholder="Member alias"
-                                    />
-                                    <button
-                                      className="remove-btn-small"
-                                      onClick={() => handleRemoveMember(member.id)}
-                                      title="Remove member"
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                  <select
-                                    className="member-model-inline"
-                                    value={member.model_id}
-                                    onChange={(event) => updateMember(member.id, { model_id: event.target.value })}
-                                  >
-                                    {councilModels.map((model) => (
-                                      <option key={model.id} value={model.id}>
-                                        {model.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <textarea
-                                    className="member-prompt-inline"
-                                    rows={2}
-                                    value={member.system_prompt || ''}
-                                    onChange={(event) =>
-                                      updateMember(member.id, { system_prompt: event.target.value })
-                                    }
-                                    placeholder="System prompt (optional)..."
-                                  />
-                                  {/* Chairman button only shows in the final stage */}
-                                  {stageIndex === (councilSettings.stages || []).length - 1 && (
-                                    <button
-                                      className={`chairman-btn-inline ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
-                                      onClick={() =>
-                                        setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
-                                      }
-                                      title={councilSettings.chairman_id === member.id ? 'Chairman (consolidates & handles follow-ups)' : 'Set as Chairman'}
-                                    >
-                                      {councilSettings.chairman_id === member.id ? '★ Chairman' : 'Set Chairman'}
-                                    </button>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            <button
-                              className="add-member-btn-inline"
-                              onClick={() => handleAddMemberToStage(stage.id)}
-                              disabled={
-                                stage.member_ids.length >= 5 ||
-                                councilSettings.members.length >= (councilSettings.max_members || 7)
-                              }
-                              title="Add member to this stage"
+                        {(!stage.type || stage.type === 'ai') ? (
+                          <div className="stage-members-section">
+                            <div className="stage-members-header">
+                              <span className="member-label">Members ({stage.member_ids.length} / 5)</span>
+                            </div>
+                            <div
+                              className="stage-members-grid"
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={() => handleMemberDrop(stage.id)}
                             >
-                              <span className="add-icon-inline">+</span>
-                              <span>Add Member</span>
-                            </button>
+                              {stage.member_ids.map((memberId, memberIndex) => {
+                                const member = councilSettings.members.find((entry) => entry.id === memberId);
+                                if (!member) return null;
+                                const isDragOver = dragOverMember?.stageId === stage.id && dragOverMember?.memberIndex === memberIndex;
+                                return (
+                                  <div
+                                    key={memberId}
+                                    className={`member-card-inline ${draggedMember?.memberId === memberId ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.stopPropagation();
+                                      handleMemberDragStart(memberId, stage.id);
+                                    }}
+                                    onDragEnd={(e) => {
+                                      e.stopPropagation();
+                                      setDraggedMember(null);
+                                      setDragOverMember(null);
+                                    }}
+                                    onDragOver={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      if (draggedMember && draggedMember.stageId === stage.id && draggedMember.memberId !== memberId) {
+                                        setDragOverMember({ stageId: stage.id, memberIndex });
+                                      }
+                                    }}
+                                    onDragLeave={(e) => {
+                                      e.stopPropagation();
+                                      setDragOverMember(null);
+                                    }}
+                                    onDrop={(e) => {
+                                      e.stopPropagation();
+                                      handleMemberDrop(stage.id, memberIndex);
+                                      setDragOverMember(null);
+                                    }}
+                                  >
+                                    <div className="member-card-inline-header">
+                                      <span className="member-number">{memberIndex + 1}</span>
+                                      <input
+                                        type="text"
+                                        className="member-alias-inline"
+                                        value={member.alias}
+                                        onChange={(event) => updateMember(member.id, { alias: event.target.value })}
+                                        placeholder="Member alias"
+                                      />
+                                      <button
+                                        className="remove-btn-small"
+                                        onClick={() => handleRemoveMemberFromStage(stage.id, member.id)}
+                                        title="Remove from stage"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                    <select
+                                      className="member-model-inline"
+                                      value={member.model_id}
+                                      onChange={(event) => updateMember(member.id, { model_id: event.target.value })}
+                                    >
+                                      {councilModels.map((model) => (
+                                        <option key={model.id} value={model.id}>
+                                          {model.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <textarea
+                                      className="member-prompt-inline"
+                                      rows={2}
+                                      value={member.system_prompt || ''}
+                                      onChange={(event) =>
+                                        updateMember(member.id, { system_prompt: event.target.value })
+                                      }
+                                      placeholder="System prompt (optional)..."
+                                    />
+                                    {/* Chairman button only shows in the final stage */}
+                                    {stageIndex === (councilSettings.stages || []).length - 1 && (
+                                      <button
+                                        className={`chairman-btn-inline ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
+                                        onClick={() =>
+                                          setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
+                                        }
+                                        title={councilSettings.chairman_id === member.id ? 'Chairman (consolidates & handles follow-ups)' : 'Set as Chairman'}
+                                      >
+                                        {councilSettings.chairman_id === member.id ? '★ Chairman' : 'Set Chairman'}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              <button
+                                className="add-member-btn-inline"
+                                onClick={() => handleAddMemberToStage(stage.id)}
+                                disabled={
+                                  stage.member_ids.length >= 5 ||
+                                  councilSettings.members.length >= (councilSettings.max_members || 7)
+                                }
+                                title="Add member to this stage"
+                              >
+                                <span className="add-icon-inline">+</span>
+                                <span>Add Member</span>
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -1066,7 +1099,8 @@ export default function Sidebar({
             </div>
           </div>
         </div>
-      )}
-    </div>
+      )
+      }
+    </div >
   );
 }

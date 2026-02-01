@@ -424,10 +424,24 @@ function App() {
       } else {
         console.error('Failed to send message:', error);
         // Remove optimistic messages on error
-        updateConversationById(targetConversationId, (prev) => ({
-          ...prev,
-          messages: prev.messages.slice(0, -2),
-        }));
+        const errorMessage = error.message === 'Bedrock key not set for this session.' || error.message.includes('Bedrock key not set')
+          ? 'Error: Bedrock API key is missing. Please add it in settings.'
+          : `Error: ${error.message}`;
+
+        updateConversationById(targetConversationId, (prev) => {
+          const messages = [...prev.messages];
+          // Remove the loading assistant message
+          messages.pop();
+          // Add error message from system
+          messages.push({
+            role: 'assistant',
+            message_type: 'speaker',
+            model: 'System',
+            response: errorMessage,
+            error: true,
+          });
+          return { ...prev, messages };
+        });
       }
       setStreamController(null);
       setStreamingConversationId(null);
@@ -455,6 +469,61 @@ function App() {
       loadConversation(currentConversationId);
     } catch (error) {
       console.error('Failed to retry message:', error);
+    }
+  };
+
+  const handleResumeCouncil = async (humanInput) => {
+    if (!currentConversationId) return;
+    try {
+      // Optimistically update the UI if needed, or just set loading state
+      // For now, we'll rely on the global isLoading check which we can trigger by
+      // mocking a streaming state or adding a separate loading state.
+      // Since resume is not streaming, we can just await it.
+
+      // Manually set loading on the last message
+      updateConversationById(currentConversationId, (prev) =>
+        updateLastAssistantMessage(prev, (lastMsg) => ({
+          ...lastMsg,
+          loading: { stage1: true, stage2: true, stage3: true } // Generic loading indicator
+        }))
+      );
+
+      const response = await api.resumeCouncil(currentConversationId, humanInput);
+
+      // Update the conversation with the new results
+      // response contains the full message object or similar structure?
+      // The backend returns:
+      // {
+      //     "message_type": "council",
+      //     "stage1": stage1_results,
+      //     "stage2": stage2_results,
+      //     "stage3": stage3_result,
+      //     "stages": stages,
+      //     "metadata": metadata,
+      //     "usage": usage
+      // }
+
+      updateConversationById(currentConversationId, (prev) =>
+        updateLastAssistantMessage(prev, (lastMsg) => ({
+          ...lastMsg,
+          stage1: response.stage1,
+          stage2: response.stage2,
+          stage3: response.stage3,
+          stages: response.stages,
+          metadata: response.metadata,
+          loading: { stage1: false, stage2: false, stage3: false }
+        }))
+      );
+
+    } catch (error) {
+      console.error('Failed to resume council:', error);
+      // Revert loading state
+      updateConversationById(currentConversationId, (prev) =>
+        updateLastAssistantMessage(prev, (lastMsg) => ({
+          ...lastMsg,
+          loading: { stage1: false, stage2: false, stage3: false }
+        }))
+      );
     }
   };
 
@@ -550,6 +619,7 @@ function App() {
           onSendMessage={handleSendMessage}
           onStop={handleStop}
           onRetry={handleRetry}
+          onResume={handleResumeCouncil}
           isLoading={streamingConversationId === currentConversationId}
           remainingMessages={remainingMessages}
         />

@@ -20,6 +20,7 @@ from .config import (
     list_converse_models_for_region,
     MAX_FOLLOW_UP_MESSAGES,
     SPEAKER_CONTEXT_LEVELS,
+    get_bedrock_api_key,
 )
 from .council_settings import (
     get_settings,
@@ -302,7 +303,9 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     session_id = http_request.state.session_id
     bedrock_key = session_store.get_bedrock_key(session_id)
     if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
+        bedrock_key = get_bedrock_api_key()
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
 
     # Estimate tokens for user message
     user_token_count = estimate_token_count(payload.content)
@@ -437,7 +440,9 @@ async def retry_message(conversation_id: str, http_request: Request):
     session_id = http_request.state.session_id
     bedrock_key = session_store.get_bedrock_key(session_id)
     if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
+        bedrock_key = get_bedrock_api_key()
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
     
     # Refresh conversation
     conversation = storage.get_conversation(conversation_id)
@@ -766,7 +771,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
     session_id = http_request.state.session_id
     bedrock_key = session_store.get_bedrock_key(session_id)
     if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
+        bedrock_key = get_bedrock_api_key()
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
 
     async def stream_worker(event_queue: "asyncio.Queue[Dict[str, Any]]", cancel_event: asyncio.Event):
         try:

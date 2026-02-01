@@ -255,6 +255,23 @@ export const api = {
   },
 
   /**
+   * Resume a paused council execution.
+   */
+  async resumeCouncil(conversationId, humanInput) {
+    const response = await apiFetch(`/api/conversations/${conversationId}/message/resume`, {
+      method: 'POST',
+      headers: withAuth({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ human_input: humanInput }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to resume council');
+    }
+    return response.json();
+  },
+
+  /**
    * Get conversation info including remaining messages and token count.
    */
   async getConversationInfo(conversationId) {

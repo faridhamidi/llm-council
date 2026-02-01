@@ -50,10 +50,25 @@ export default function ChatInterface({
   onStop,
   isLoading,
   onRetry,
+  onResume,
   remainingMessages,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
+
+  // Check for paused state
+  const lastMessage = conversation?.messages?.[conversation.messages.length - 1];
+  const isPaused =
+    lastMessage?.role === 'assistant' &&
+    lastMessage?.metadata?.execution_state === 'paused';
+
+  const handleResumeSubmit = (e) => {
+    e.preventDefault();
+    if (input.trim() && !isLoading && onResume) {
+      onResume(input);
+      setInput('');
+    }
+  };
 
   const buildLabelMap = (message) => {
     if (message?.metadata?.label_to_model) {
@@ -290,7 +305,40 @@ export default function ChatInterface({
         <div ref={messagesEndRef} />
       </div>
 
-      {hasMessages && remainingMessages !== 0 && (
+      {isPaused && (
+        <div className="paused-input-container">
+          <div className="paused-banner">
+            <span className="paused-icon">⏸️</span>
+            <span>Council Paused - Waiting for Human Input</span>
+          </div>
+          <form className="input-form paused-form" onSubmit={handleResumeSubmit}>
+            <textarea
+              className="message-input"
+              placeholder="Provide your input to resume the council..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleResumeSubmit(e);
+                }
+              }}
+              disabled={isLoading}
+              rows={3}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="send-button resume-button"
+              disabled={!input.trim() || isLoading}
+            >
+              Resume Council
+            </button>
+          </form>
+        </div>
+      )}
+
+      {hasMessages && remainingMessages !== 0 && !isPaused && (
         <form className="input-form follow-up" onSubmit={handleSubmit}>
           {messageCounter}
           <textarea
