@@ -93,7 +93,7 @@ def _format_stage_prompt(
         }
         if template_values:
             values.update(template_values)
-        prompt_parts.append(_apply_prompt_template(stage_prompt.strip(), values))
+        return _apply_prompt_template(stage_prompt.strip(), values).strip()
     prompt_parts.append(f"User Question: {user_query}")
     if prior_context:
         prompt_parts.append("Previous Stage Outputs:\n" + prior_context)
