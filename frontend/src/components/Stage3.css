@@ -3,6 +3,18 @@
   border-color: rgba(16, 185, 129, 0.35);
 }
 
+.stage3 .stage-prompt-text {
+  margin: -8px 0 14px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .final-response {
   background: var(--bg-secondary);
   padding: 18px;

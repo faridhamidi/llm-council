@@ -21,6 +21,12 @@ def _ensure_db_dir() -> None:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_stages_column(conn: sqlite3.Connection) -> None:
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()]
+    if "stages_json" not in columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN stages_json TEXT")
+
+
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -42,6 +48,16 @@ def _parse_iso(ts: str) -> datetime:
         return datetime.fromisoformat(ts.replace("Z", ""))
     except Exception:
         return datetime.utcnow()
+
+
+def get_auth_policy() -> str | None:
+    with with_connection() as conn:
+        return _meta_get(conn, "auth_pin_policy")
+
+
+def set_auth_policy(policy: str) -> None:
+    with with_connection() as conn:
+        _meta_set(conn, "auth_pin_policy", policy)
 
 
 def _migrate_conversations(conn: sqlite3.Connection) -> None:
@@ -250,6 +266,7 @@ def init_db() -> None:
               stage1_json TEXT,
               stage2_json TEXT,
               stage3_json TEXT,
+              stages_json TEXT,
               created_at TEXT NOT NULL,
               FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
@@ -276,6 +293,7 @@ def init_db() -> None:
             """
         )
         _migrate_from_json(conn)
+        _ensure_stages_column(conn)
         conn.commit()
     finally:
         conn.close()

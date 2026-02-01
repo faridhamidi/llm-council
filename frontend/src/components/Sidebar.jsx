@@ -23,10 +23,54 @@ export default function Sidebar({
   const [councilError, setCouncilError] = useState(null);
   const [isCouncilSaving, setIsCouncilSaving] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [draggedStageIndex, setDraggedStageIndex] = useState(null);
+  const [draggedMember, setDraggedMember] = useState(null);
   const [councilPresets, setCouncilPresets] = useState([]);
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [presetNameInput, setPresetNameInput] = useState('');
   const [presetStatus, setPresetStatus] = useState(null);
+
+  const buildDefaultStages = (members, chairmanId) => {
+    const memberIds = members.map((member) => member.id);
+    const defaultChairman = memberIds.includes(chairmanId) ? chairmanId : memberIds[0] || '';
+    return [
+      {
+        id: 'stage-1',
+        name: 'Individual Responses',
+        prompt: '',
+        execution_mode: 'parallel',
+        member_ids: memberIds,
+      },
+      {
+        id: 'stage-2',
+        name: 'Peer Rankings',
+        prompt: '',
+        execution_mode: 'parallel',
+        member_ids: memberIds,
+      },
+      {
+        id: 'stage-3',
+        name: 'Final Synthesis',
+        prompt: '',
+        execution_mode: 'sequential',
+        member_ids: defaultChairman ? [defaultChairman] : [],
+      },
+    ];
+  };
+
+  const normalizeStage = (stage, members, index, fallbackChairmanId) => {
+    const memberIds = new Set(members.map((member) => member.id));
+    const normalizedIds = (stage.member_ids || []).filter((id) => memberIds.has(id));
+    const fallbackId = fallbackChairmanId || members[0]?.id;
+    const ensuredIds = normalizedIds.length > 0 ? normalizedIds : (fallbackId ? [fallbackId] : []);
+    return {
+      id: stage.id || `stage-${index + 1}`,
+      name: stage.name || `Stage ${index + 1}`,
+      prompt: stage.prompt ?? '',
+      execution_mode: stage.execution_mode === 'sequential' ? 'sequential' : 'parallel',
+      member_ids: ensuredIds,
+    };
+  };
 
   const coerceCouncilSettings = (settings, models) => {
     if (!settings || !Array.isArray(models) || models.length === 0) return settings;
@@ -44,6 +88,12 @@ export default function Sidebar({
     const nextTitleModelId = allowedIds.has(settings.title_model_id)
       ? settings.title_model_id
       : fallbackId;
+    const stageSource = Array.isArray(settings.stages) && settings.stages.length > 0
+      ? settings.stages
+      : buildDefaultStages(nextMembers, nextChairmanId);
+    const normalizedStages = stageSource.map((stage, index) =>
+      normalizeStage(stage, nextMembers, index, nextChairmanId)
+    );
     return {
       ...settings,
       members: nextMembers,
@@ -51,6 +101,7 @@ export default function Sidebar({
       title_model_id: nextTitleModelId,
       use_system_prompt_stage2: settings.use_system_prompt_stage2 ?? true,
       use_system_prompt_stage3: settings.use_system_prompt_stage3 ?? true,
+      stages: normalizedStages,
     };
   };
 
@@ -149,6 +200,8 @@ export default function Sidebar({
   const closeCouncilModal = () => {
     setIsCouncilModalOpen(false);
     setDraggedIndex(null);
+    setDraggedStageIndex(null);
+    setDraggedMember(null);
     setPresetNameInput('');
     setPresetStatus(null);
   };
@@ -210,6 +263,91 @@ export default function Sidebar({
     setDraggedIndex(null);
   };
 
+  const updateStage = (stageId, updates) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const nextStages = (prev.stages || []).map((stage) =>
+        stage.id === stageId ? { ...stage, ...updates } : stage
+      );
+      return { ...prev, stages: nextStages };
+    });
+  };
+
+  const handleStageDragStart = (index) => {
+    setDraggedStageIndex(index);
+  };
+
+  const handleStageDrop = (index) => {
+    setCouncilSettings((prev) => {
+      if (!prev || draggedStageIndex === null || draggedStageIndex === index) return prev;
+      const nextStages = [...(prev.stages || [])];
+      const [moved] = nextStages.splice(draggedStageIndex, 1);
+      nextStages.splice(index, 0, moved);
+      return { ...prev, stages: nextStages };
+    });
+    setDraggedStageIndex(null);
+  };
+
+  const handleMemberDragStart = (memberId, stageId) => {
+    setDraggedMember({ memberId, stageId });
+  };
+
+  const handleMemberDrop = (targetStageId) => {
+    setCouncilSettings((prev) => {
+      if (!prev || !draggedMember) return prev;
+      if (draggedMember.stageId === targetStageId) return prev;
+      const nextStages = (prev.stages || []).map((stage) => {
+        if (stage.id === draggedMember.stageId) {
+          return {
+            ...stage,
+            member_ids: stage.member_ids.filter((id) => id !== draggedMember.memberId),
+          };
+        }
+        if (stage.id === targetStageId) {
+          if (stage.member_ids.length >= 5) {
+            return stage;
+          }
+          return {
+            ...stage,
+            member_ids: [...stage.member_ids, draggedMember.memberId],
+          };
+        }
+        return stage;
+      });
+      return { ...prev, stages: nextStages };
+    });
+    setDraggedMember(null);
+  };
+
+  const handleAddStage = () => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const stages = prev.stages || [];
+      if (stages.length >= 10) return prev;
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `stage-${Date.now()}`;
+      const fallbackMember = prev.chairman_id || prev.members[0]?.id;
+      const nextStage = {
+        id: newId,
+        name: `Stage ${stages.length + 1}`,
+        prompt: '',
+        execution_mode: 'parallel',
+        member_ids: fallbackMember ? [fallbackMember] : [],
+      };
+      return { ...prev, stages: [...stages, nextStage] };
+    });
+  };
+
+  const handleRemoveStage = (stageId) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const nextStages = (prev.stages || []).filter((stage) => stage.id !== stageId);
+      if (nextStages.length === 0) return prev;
+      return { ...prev, stages: nextStages };
+    });
+  };
+
   const handleSaveCouncil = async () => {
     if (!councilSettings) return;
     setIsCouncilSaving(true);
@@ -226,6 +364,7 @@ export default function Sidebar({
         title_model_id: nextSettings.title_model_id,
         use_system_prompt_stage2: nextSettings.use_system_prompt_stage2 ?? true,
         use_system_prompt_stage3: nextSettings.use_system_prompt_stage3 ?? true,
+        stages: nextSettings.stages || [],
       };
       await api.updateCouncilSettings(payload);
       setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
@@ -271,6 +410,7 @@ export default function Sidebar({
         chairman_id: nextSettings.chairman_id,
         chairman_label: nextSettings.chairman_label || 'Chairman',
         title_model_id: nextSettings.title_model_id,
+        stages: nextSettings.stages || [],
       });
       setCouncilPresets(response.presets || []);
       setPresetNameInput('');
@@ -547,6 +687,104 @@ export default function Sidebar({
                 <>
                   <div className="info-text">
                     → Drag cards to reorder. Updates apply to new messages immediately after saving.
+                  </div>
+                  <div className="info-text stage-info">
+                    → Stage builder: drag members between stages, drag stages to reorder, and set prompt + execution mode.
+                  </div>
+                  <div className="stages-header">
+                    <div>
+                      <div className="section-title">Council Flow</div>
+                      <div className="section-subtitle">Up to 10 stages, 5 members per stage.</div>
+                    </div>
+                    <button
+                      className="small-btn"
+                      onClick={handleAddStage}
+                      disabled={(councilSettings.stages || []).length >= 10}
+                    >
+                      Add Stage
+                    </button>
+                  </div>
+                  <div className="stages-grid">
+                    {(councilSettings.stages || []).map((stage, stageIndex) => (
+                      <div
+                        key={stage.id}
+                        className="stage-card"
+                        draggable
+                        onDragStart={() => handleStageDragStart(stageIndex)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => handleStageDrop(stageIndex)}
+                      >
+                        <div className="stage-card-header">
+                          <div>
+                            <div className="stage-kicker">Stage {stageIndex + 1}</div>
+                            <input
+                              type="text"
+                              className="stage-name-input"
+                              value={stage.name}
+                              onChange={(event) => updateStage(stage.id, { name: event.target.value })}
+                            />
+                          </div>
+                          <button
+                            className="remove-btn"
+                            onClick={() => handleRemoveStage(stage.id)}
+                            title="Remove stage"
+                            disabled={(councilSettings.stages || []).length <= 1}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <label className="member-label" htmlFor={`stage-${stage.id}-mode`}>
+                          Execution
+                        </label>
+                        <select
+                          id={`stage-${stage.id}-mode`}
+                          className="control-input"
+                          value={stage.execution_mode}
+                          onChange={(event) => updateStage(stage.id, { execution_mode: event.target.value })}
+                        >
+                          <option value="parallel">Parallel</option>
+                          <option value="sequential">Sequential</option>
+                        </select>
+                        <label className="member-label" htmlFor={`stage-${stage.id}-prompt`}>
+                          Stage prompt (visible in chat)
+                        </label>
+                        <textarea
+                          id={`stage-${stage.id}-prompt`}
+                          className="stage-prompt"
+                          rows={3}
+                          value={stage.prompt || ''}
+                          onChange={(event) => updateStage(stage.id, { prompt: event.target.value })}
+                          placeholder="Optional guidance. Supports {question}, {responses}, {response_count}, {response_labels}, {stage1}, {stage2}."
+                        />
+                        <div className="stage-member-hint">
+                          {stage.member_ids.length} / 5 members assigned.
+                        </div>
+                        <div
+                          className="stage-members"
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => handleMemberDrop(stage.id)}
+                        >
+                          {stage.member_ids.map((memberId) => {
+                            const member = councilSettings.members.find((entry) => entry.id === memberId);
+                            if (!member) return null;
+                            return (
+                              <div
+                                key={memberId}
+                                className="stage-member-chip"
+                                draggable
+                                onDragStart={() => handleMemberDragStart(memberId, stage.id)}
+                                onDragEnd={() => setDraggedMember(null)}
+                              >
+                                <span>{member.alias}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="stage-member-hint">
+                          Drag members here (max 5).
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   <div className="members-grid">
                     {councilSettings.members.map((member, index) => (

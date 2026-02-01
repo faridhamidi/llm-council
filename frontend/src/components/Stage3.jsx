@@ -12,7 +12,12 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage3({ finalResponse, labelToModel }) {
+export default function Stage3({
+  finalResponse,
+  labelToModel,
+  stageName = 'Final Council Answer',
+  stagePrompt = '',
+}) {
   const [copied, setCopied] = useState(false);
 
   if (!finalResponse) {
@@ -45,7 +50,8 @@ export default function Stage3({ finalResponse, labelToModel }) {
 
   return (
     <div className="stage stage3">
-      <h3 className="stage-title">Stage 3: Final Council Answer</h3>
+      <h3 className="stage-title">{stageName}</h3>
+      {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
       <div className="final-response">
         <div className="stage3-header">
           <div className="chairman-label">Chairman: {finalResponse.model}</div>

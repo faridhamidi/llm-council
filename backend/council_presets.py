@@ -8,9 +8,15 @@ import datetime as dt
 from typing import Dict, Any, List
 
 from .db import with_connection
-from .council_settings import get_settings, MAX_COUNCIL_MEMBERS
+from .council_settings import (
+    get_settings,
+    MAX_COUNCIL_MEMBERS,
+    ensure_stage_config,
+    build_default_stages,
+)
 
-PRESETS_VERSION = 1
+PRESETS_VERSION = 2
+DEFAULT_PRESET_NAME = "Default Council Flow"
 
 
 def _now_iso() -> str:
@@ -30,7 +36,7 @@ def _normalize_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         member.setdefault("alias", "")
         member.setdefault("model_id", "")
         member.setdefault("id", str(uuid.uuid4()))
-    return normalized
+    return ensure_stage_config(normalized)
 
 
 def _default_four_member_preset() -> Dict[str, Any]:
@@ -57,8 +63,14 @@ def _default_four_member_preset() -> Dict[str, Any]:
         "title_model_id": title_model,
         "use_system_prompt_stage2": True,
         "use_system_prompt_stage3": True,
+        "stages": build_default_stages(members, members[0]["id"]),
     }
     return _normalize_settings(settings)
+
+
+def _default_council_preset() -> Dict[str, Any]:
+    settings = _normalize_settings(get_settings())
+    return settings
 
 
 def _ensure_defaults() -> None:
@@ -69,6 +81,12 @@ def _ensure_defaults() -> None:
 
         hats_settings = _normalize_settings(get_settings())
         presets = [
+            {
+                "id": str(uuid.uuid4()),
+                "name": DEFAULT_PRESET_NAME,
+                "created_at": _now_iso(),
+                "settings": _default_council_preset(),
+            },
             {
                 "id": str(uuid.uuid4()),
                 "name": "Six Thinking Hats",
@@ -134,6 +152,8 @@ def _find_preset_by_name(name: str) -> Dict[str, Any] | None:
 def create_preset(name: str, settings: Dict[str, Any]) -> Dict[str, Any]:
     _ensure_defaults()
     existing = _find_preset_by_name(name)
+    if existing and existing["name"].strip().lower() == DEFAULT_PRESET_NAME.lower():
+        raise ValueError("Default council preset cannot be updated.")
     normalized_settings = _normalize_settings(settings)
     now = _now_iso()
 
@@ -195,6 +215,12 @@ def find_preset(preset_id: str) -> Dict[str, Any] | None:
 def delete_preset(preset_id: str) -> bool:
     _ensure_defaults()
     with with_connection() as conn:
+        row = conn.execute(
+            "SELECT name FROM council_presets WHERE id = ?",
+            (preset_id,),
+        ).fetchone()
+        if row and row["name"].strip().lower() == DEFAULT_PRESET_NAME.lower():
+            raise ValueError("Default council preset cannot be deleted.")
         cursor = conn.execute(
             "DELETE FROM council_presets WHERE id = ?",
             (preset_id,),

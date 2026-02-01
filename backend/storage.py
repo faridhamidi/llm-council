@@ -61,7 +61,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 
         messages_rows = conn.execute(
             """
-            SELECT role, content, stage1_json, stage2_json, stage3_json, created_at
+            SELECT role, content, stage1_json, stage2_json, stage3_json, stages_json, created_at
             FROM messages
             WHERE conversation_id = ?
             ORDER BY id ASC
@@ -77,11 +77,13 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
             stage1 = json.loads(msg["stage1_json"]) if msg["stage1_json"] else None
             stage2 = json.loads(msg["stage2_json"]) if msg["stage2_json"] else None
             stage3 = json.loads(msg["stage3_json"]) if msg["stage3_json"] else None
+            stages = json.loads(msg["stages_json"]) if msg["stages_json"] else None
             messages.append({
                 "role": "assistant",
                 "stage1": stage1,
                 "stage2": stage2,
                 "stage3": stage3,
+                "stages": stages,
             })
 
     return {
@@ -144,7 +146,8 @@ def add_assistant_message(
     conversation_id: str,
     stage1: List[Dict[str, Any]],
     stage2: List[Dict[str, Any]],
-    stage3: Dict[str, Any]
+    stage3: Dict[str, Any],
+    stages: List[Dict[str, Any]] | None = None,
 ) -> None:
     """
     Add an assistant message with all 3 stages to a conversation.
@@ -154,18 +157,20 @@ def add_assistant_message(
         stage1: List of individual model responses
         stage2: List of model rankings
         stage3: Final synthesized response
+        stages: Full stage outputs
     """
     with with_connection() as conn:
         conn.execute(
             """
-            INSERT INTO messages (conversation_id, role, stage1_json, stage2_json, stage3_json, created_at)
-            VALUES (?, 'assistant', ?, ?, ?, ?)
+            INSERT INTO messages (conversation_id, role, stage1_json, stage2_json, stage3_json, stages_json, created_at)
+            VALUES (?, 'assistant', ?, ?, ?, ?, ?)
             """,
             (
                 conversation_id,
                 json.dumps(stage1),
                 json.dumps(stage2),
                 json.dumps(stage3),
+                json.dumps(stages) if stages is not None else None,
                 _now_iso(),
             ),
         )

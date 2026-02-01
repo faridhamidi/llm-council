@@ -128,6 +128,24 @@ export const api = {
   },
 
   /**
+   * Set PIN policy for deployment.
+   */
+  async setAuthPolicy(enabled) {
+    const response = await apiFetch('/api/auth/policy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to set PIN policy');
+    }
+    return response.json();
+  },
+
+  /**
    * List all conversations.
    */
   async listConversations() {
