@@ -75,10 +75,25 @@ def _default_pipeline() -> List[PipelineStage]:
     ]
 
 
-def _format_stage_prompt(stage_prompt: str | None, user_query: str, prior_context: str | None = None) -> str:
+def _format_stage_prompt(
+    stage_prompt: str | None,
+    user_query: str,
+    prior_context: str | None = None,
+    template_values: Dict[str, str] | None = None,
+) -> str:
     prompt_parts = []
     if stage_prompt:
-        prompt_parts.append(stage_prompt.strip())
+        values = {
+            "question": user_query,
+            "responses": prior_context or "",
+            "response_count": "0",
+            "response_labels": "",
+            "stage1": "",
+            "stage2": "",
+        }
+        if template_values:
+            values.update(template_values)
+        return _apply_prompt_template(stage_prompt.strip(), values).strip()
     prompt_parts.append(f"User Question: {user_query}")
     if prior_context:
         prompt_parts.append("Previous Stage Outputs:\n" + prior_context)
@@ -110,8 +125,30 @@ async def _collect_stage_responses(
     execution_mode: str,
     prior_context: str | None,
     api_key: str | None,
+    prior_results: List[Dict[str, Any]] | None = None,
+    stage1_results: List[Dict[str, Any]] | None = None,
+    stage2_results: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
-    prompt_text = _format_stage_prompt(stage_prompt, user_query, prior_context)
+    response_count = len(prior_results) if prior_results else 0
+    response_labels = ", ".join([
+        result.get("model", "")
+        for result in (prior_results or [])
+        if result.get("model")
+    ])
+    stage1_text = _format_responses_for_context(stage1_results) if stage1_results else ""
+    stage2_text = _format_responses_for_context(stage2_results) if stage2_results else ""
+    prompt_text = _format_stage_prompt(
+        stage_prompt,
+        user_query,
+        prior_context,
+        template_values={
+            "responses": prior_context or "",
+            "response_count": str(response_count),
+            "response_labels": response_labels,
+            "stage1": stage1_text,
+            "stage2": stage2_text,
+        },
+    )
     messages = [{"role": "user", "content": prompt_text}]
     tasks = []
     if execution_mode == "sequential":
@@ -594,6 +631,8 @@ async def run_full_council(
                 execution_mode,
                 None,
                 api_key,
+                stage1_results=[],
+                stage2_results=[],
             )
             last_responses = stage1_results
             stage_entry.update({"kind": "responses", "results": stage1_results})
@@ -634,6 +673,9 @@ async def run_full_council(
                 execution_mode,
                 prior_context,
                 api_key,
+                prior_results=last_responses,
+                stage1_results=stage1_results,
+                stage2_results=stage2_results,
             )
             last_responses = stage_results
             stage_entry.update({"kind": "responses", "results": stage_results})
