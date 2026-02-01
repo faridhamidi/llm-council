@@ -16,6 +16,8 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [hasPin, setHasPin] = useState(false);
+  const [authPolicy, setAuthPolicy] = useState(null);
+  const [authSetupRequired, setAuthSetupRequired] = useState(false);
   const [accessKeyPresent, setAccessKeyPresent] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -41,8 +43,13 @@ function App() {
         clearAccessKey();
         setAccessKeyPresent(false);
         const status = await api.getAuthStatus();
+        setAuthPolicy(status.policy ?? null);
+        setAuthSetupRequired(Boolean(status.requires_setup));
         setHasPin(Boolean(status.has_pin));
-        if (!status.has_pin) {
+        if (status.policy === 'disabled') {
+          setAccessKeyPresent(true);
+          loadConversations();
+        } else if (!status.has_pin && !status.requires_setup) {
           loadConversations();
         }
       } catch (error) {
@@ -63,10 +70,14 @@ function App() {
 
   useEffect(() => {
     if (!authChecked) return;
+    if (authPolicy === 'disabled') {
+      loadConversations();
+      return;
+    }
     if (hasPin && accessKeyPresent) {
       loadConversations();
     }
-  }, [authChecked, hasPin, accessKeyPresent]);
+  }, [authChecked, hasPin, accessKeyPresent, authPolicy]);
 
   const loadConversations = async () => {
     try {
@@ -449,6 +460,7 @@ function App() {
         setAccessKey(trimmed);
         setAccessKeyPresent(true);
         setHasPin(true);
+        setAuthPolicy('required');
         setPinInput('');
         loadConversations();
       } catch (error) {
@@ -465,7 +477,27 @@ function App() {
     loadConversations();
   };
 
-  const isAuthorized = authChecked && (hasPin ? accessKeyPresent : true);
+  const isAuthorized = authChecked && (authPolicy === 'disabled' || (hasPin && accessKeyPresent));
+  const requiresPin = authPolicy === 'required';
+
+  const handlePolicyChoice = async (enabled) => {
+    try {
+      setIsSettingPin(true);
+      const response = await api.setAuthPolicy(enabled);
+      setAuthPolicy(response.policy);
+      setAuthSetupRequired(false);
+      setPinError('');
+      if (response.policy === 'disabled') {
+        setHasPin(false);
+        setAccessKeyPresent(true);
+        loadConversations();
+      }
+    } catch (error) {
+      setPinError(error.message || 'Failed to set PIN policy.');
+    } finally {
+      setIsSettingPin(false);
+    }
+  };
 
   return (
     <div className={`app app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
@@ -485,7 +517,7 @@ function App() {
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
-          accessKeyReady={authChecked && (hasPin ? isAuthorized : true)}
+          accessKeyReady={authChecked && (authPolicy === 'disabled' || isAuthorized)}
         />
       </div>
       <div className="chat-panel">
@@ -521,7 +553,47 @@ function App() {
           </div>
         </div>
       )}
-      {authChecked && hasPin && !isAuthorized && (
+      {authChecked && authSetupRequired && (
+        <div className="pin-backdrop">
+          <div className="pin-modal">
+            <div className="pin-header">
+              <div className="pin-logo">
+                <img src={logoMark} alt="" />
+              </div>
+              <div>
+                <div className="pin-title">Secure this deployment?</div>
+                <div className="pin-subtitle">
+                  Choose whether this deployment should require a PIN. This choice is stored in the database and will
+                  persist until the DB is deleted or reset.
+                </div>
+              </div>
+            </div>
+            {pinError && <div className="pin-error">{pinError}</div>}
+            <div className="pin-hint">
+              Tip: Enable PIN if you are exposing the app beyond your local machine.
+            </div>
+            <div className="pin-choice-actions">
+              <button
+                type="button"
+                className="pin-submit"
+                onClick={() => handlePolicyChoice(true)}
+                disabled={isSettingPin}
+              >
+                Require PIN
+              </button>
+              <button
+                type="button"
+                className="pin-skip"
+                onClick={() => handlePolicyChoice(false)}
+                disabled={isSettingPin}
+              >
+                Continue without PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {authChecked && !authSetupRequired && requiresPin && !isAuthorized && (
         <div className="pin-backdrop">
           <form className="pin-modal" onSubmit={handlePinSubmit}>
             <div className="pin-header">

@@ -21,6 +21,18 @@
   line-height: 1.6;
 }
 
+.stage2 .stage-prompt-text {
+  margin: -8px 0 14px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .aggregate-rankings {
   background: linear-gradient(135deg, rgba(62, 207, 142, 0.18), rgba(20, 184, 166, 0.12));
   padding: 16px;

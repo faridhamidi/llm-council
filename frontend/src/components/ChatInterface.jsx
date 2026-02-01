@@ -72,6 +72,47 @@ export default function ChatInterface({
     return labelMap;
   };
 
+  const renderDynamicStages = (message) => {
+    const stages = message?.stages;
+    if (!Array.isArray(stages) || stages.length === 0) {
+      return null;
+    }
+    return stages.map((stage, stageIndex) => {
+      const stageLabelMap = stage.label_to_model || buildLabelMap(message);
+      if (stage.kind === 'rankings') {
+        return (
+          <Stage2
+            key={stage.id || stageIndex}
+            rankings={stage.results}
+            labelToModel={stageLabelMap}
+            aggregateRankings={stage.aggregate_rankings}
+            stageName={stage.name}
+            stagePrompt={stage.prompt}
+          />
+        );
+      }
+      if (stage.kind === 'synthesis') {
+        return (
+          <Stage3
+            key={stage.id || stageIndex}
+            finalResponse={stage.results}
+            labelToModel={stageLabelMap}
+            stageName={stage.name}
+            stagePrompt={stage.prompt}
+          />
+        );
+      }
+      return (
+        <Stage1
+          key={stage.id || stageIndex}
+          responses={stage.results}
+          stageName={stage.name}
+          stagePrompt={stage.prompt}
+        />
+      );
+    });
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -137,13 +178,17 @@ export default function ChatInterface({
                   <div className="message-label">LLM Council</div>
                   {(() => {
                     const labelToModel = buildLabelMap(msg);
+                    const dynamicStages = renderDynamicStages(msg);
                     return (
                       <>
+                        {dynamicStages}
+                        {!dynamicStages && (
+                          <>
                         {/* Stage 1 */}
                         {msg.loading?.stage1 && (
                           <div className="stage-loading">
                             <div className="spinner"></div>
-                            <span>Running Stage 1: Collecting individual responses...</span>
+                            <span>Running: Collecting individual responses...</span>
                           </div>
                         )}
                         {msg.stage1 && <Stage1 responses={msg.stage1} />}
@@ -152,7 +197,7 @@ export default function ChatInterface({
                         {msg.loading?.stage2 && (
                           <div className="stage-loading">
                             <div className="spinner"></div>
-                            <span>Running Stage 2: Peer rankings...</span>
+                            <span>Running: Peer rankings...</span>
                           </div>
                         )}
                         {msg.stage2 && (
@@ -167,7 +212,7 @@ export default function ChatInterface({
                         {msg.loading?.stage3 && (
                           <div className="stage-loading">
                             <div className="spinner"></div>
-                            <span>Running Stage 3: Final synthesis...</span>
+                            <span>Running: Final synthesis...</span>
                           </div>
                         )}
                         {msg.stage3 && (
@@ -175,6 +220,8 @@ export default function ChatInterface({
                             finalResponse={msg.stage3}
                             labelToModel={labelToModel}
                           />
+                        )}
+                          </>
                         )}
                       </>
                     );

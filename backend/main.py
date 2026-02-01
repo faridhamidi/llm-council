@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 import uuid
 import json
 import asyncio
@@ -23,6 +23,9 @@ from .council_settings import (
     get_settings,
     update_settings,
     MAX_COUNCIL_MEMBERS,
+    MAX_COUNCIL_STAGES,
+    MAX_STAGE_MEMBERS,
+    build_default_stages,
     normalize_settings_for_region,
 )
 from .council_presets import (
@@ -78,6 +81,14 @@ async def _require_pin(request: Request, call_next):
     if request.url.path.startswith("/api"):
         if request.url.path in {"/api/auth/status", "/api/auth/setup"}:
             return await call_next(request)
+        if request.url.path == "/api/auth/policy":
+            return await call_next(request)
+
+        policy = db.get_auth_policy()
+        if policy is None:
+            return JSONResponse(status_code=401, content={"detail": "PIN_SETUP_REQUIRED"})
+        if policy == "disabled":
+            return await call_next(request)
 
         if not db.has_auth_pin():
             return JSONResponse(status_code=401, content={"detail": "PIN_REQUIRED"})
@@ -113,6 +124,10 @@ class AuthPinRequest(BaseModel):
     pin: str
 
 
+class AuthPolicyRequest(BaseModel):
+    """Request to set the PIN policy for a deployment."""
+    enabled: bool
+
 MAX_SYSTEM_PROMPT_CHARS = 4000
 
 
@@ -123,6 +138,14 @@ class CouncilMemberConfig(BaseModel):
     system_prompt: str | None = ""
 
 
+class CouncilStageConfig(BaseModel):
+    id: str
+    name: str
+    prompt: str | None = ""
+    execution_mode: Literal["parallel", "sequential"] = "parallel"
+    member_ids: List[str]
+
+
 class CouncilSettingsRequest(BaseModel):
     members: List[CouncilMemberConfig]
     chairman_id: str
@@ -130,6 +153,7 @@ class CouncilSettingsRequest(BaseModel):
     title_model_id: str
     use_system_prompt_stage2: bool = True
     use_system_prompt_stage3: bool = True
+    stages: List[CouncilStageConfig] | None = None
 
 
 class CouncilPresetRequest(BaseModel):
@@ -167,8 +191,14 @@ async def root():
 async def auth_status():
     """Return whether a PIN is configured."""
     if DISABLE_APP_PIN:
-        return {"has_pin": False, "disabled": True}
-    return {"has_pin": db.has_auth_pin(), "disabled": False}
+        return {"has_pin": False, "disabled": True, "policy": "disabled", "requires_setup": False}
+    policy = db.get_auth_policy()
+    return {
+        "has_pin": db.has_auth_pin(),
+        "disabled": False,
+        "policy": policy,
+        "requires_setup": policy is None,
+    }
 
 
 @app.post("/api/auth/setup")
@@ -184,7 +214,21 @@ async def auth_setup(request: AuthPinRequest):
     if db.has_auth_pin():
         raise HTTPException(status_code=409, detail="PIN already set")
     db.set_auth_pin(pin)
+    if db.get_auth_policy() is None:
+        db.set_auth_policy("required")
     return {"status": "ok", "has_pin": True}
+
+
+@app.post("/api/auth/policy")
+async def set_auth_policy(request: AuthPolicyRequest):
+    """Set the PIN policy for this deployment."""
+    if DISABLE_APP_PIN:
+        raise HTTPException(status_code=400, detail="PIN is disabled")
+    if db.get_auth_policy() is not None:
+        raise HTTPException(status_code=409, detail="PIN policy already configured")
+    policy = "required" if request.enabled else "disabled"
+    db.set_auth_policy(policy)
+    return {"status": "ok", "policy": policy}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -257,7 +301,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
 
     # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+    stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
         payload.content,
         api_key=bedrock_key,
     )
@@ -267,7 +311,8 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         conversation_id,
         stage1_results,
         stage2_results,
-        stage3_result
+        stage3_result,
+        stages=stages,
     )
 
     # Return the complete response with metadata
@@ -275,7 +320,8 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         "stage1": stage1_results,
         "stage2": stage2_results,
         "stage3": stage3_result,
-        "metadata": metadata
+        "metadata": metadata,
+        "stages": stages,
     }
 
 
@@ -374,6 +420,35 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
     if payload.chairman_id not in ids:
         errors.append("Chairman must be one of the council members.")
 
+    stages = (
+        [stage.model_dump() for stage in payload.stages]
+        if payload.stages
+        else build_default_stages(
+            [member.model_dump() for member in members],
+            payload.chairman_id,
+        )
+    )
+    if len(stages) > MAX_COUNCIL_STAGES:
+        errors.append(f"Maximum {MAX_COUNCIL_STAGES} stages allowed.")
+    stage_ids = [stage["id"] for stage in stages]
+    if len(set(stage_ids)) != len(stage_ids):
+        errors.append("Stage IDs must be unique.")
+    for stage in stages:
+        stage_name = (stage.get("name") or "").strip()
+        if not stage_name:
+            errors.append("Stage names cannot be empty.")
+            break
+        member_ids = stage.get("member_ids", [])
+        if not member_ids:
+            errors.append(f"Stage '{stage_name}' must include at least one member.")
+            break
+        if len(member_ids) > MAX_STAGE_MEMBERS:
+            errors.append(f"Stage '{stage_name}' exceeds max members ({MAX_STAGE_MEMBERS}).")
+            break
+        if any(member_id not in ids for member_id in member_ids):
+            errors.append(f"Stage '{stage_name}' references unknown members.")
+            break
+
     return errors
 
 
@@ -384,8 +459,16 @@ async def update_council_settings(request: CouncilSettingsRequest):
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
 
+    stages = (
+        [stage.model_dump() for stage in request.stages]
+        if request.stages
+        else build_default_stages(
+            [member.model_dump() for member in request.members],
+            request.chairman_id,
+        )
+    )
     settings = {
-        "version": 1,
+        "version": 2,
         "max_members": MAX_COUNCIL_MEMBERS,
         "members": [member.model_dump() for member in request.members],
         "chairman_id": request.chairman_id,
@@ -393,6 +476,7 @@ async def update_council_settings(request: CouncilSettingsRequest):
         "title_model_id": request.title_model_id,
         "use_system_prompt_stage2": request.use_system_prompt_stage2,
         "use_system_prompt_stage3": request.use_system_prompt_stage3,
+        "stages": stages,
     }
 
     update_settings(settings)
@@ -408,7 +492,10 @@ async def create_council_preset(request: CouncilPresetRequest):
     errors = _validate_council_settings(request.settings)
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
-    preset = create_preset(name, request.settings.model_dump())
+    try:
+        preset = create_preset(name, request.settings.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"errors": [str(exc)]}) from exc
     was_updated = "updated_at" in preset
     return {"status": "ok", "preset": preset, "presets": list_presets(), "updated": was_updated}
 
@@ -439,7 +526,10 @@ async def apply_council_preset(request: CouncilPresetApplyRequest):
 @app.delete("/api/settings/council/presets/{preset_id}")
 async def delete_council_preset(preset_id: str):
     """Delete a council preset."""
-    deleted = delete_preset(preset_id)
+    try:
+        deleted = delete_preset(preset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"errors": [str(exc)]}) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Preset not found")
     return {"status": "ok", "presets": list_presets()}

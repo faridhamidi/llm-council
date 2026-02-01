@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Stage1.css';
 
-export default function Stage1({ responses }) {
+export default function Stage1({ responses, stageName = 'Individual Responses', stagePrompt = '' }) {
   const [activeTab, setActiveTab] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -51,7 +51,8 @@ export default function Stage1({ responses }) {
 
   return (
     <div className="stage stage1">
-      <h3 className="stage-title">Stage 1: Individual Responses</h3>
+      <h3 className="stage-title">{stageName}</h3>
+      {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
 
       <div className="tabs">
         {responses.map((resp, index) => (

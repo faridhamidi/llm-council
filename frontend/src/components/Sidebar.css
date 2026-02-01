@@ -543,6 +543,131 @@
   font-family: var(--font-mono);
 }
 
+.info-text.stage-info {
+  border-left-color: var(--accent-teal);
+}
+
+.stages-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.section-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.stages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.stage-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stage-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.stage-kicker {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  letter-spacing: 0.8px;
+  font-weight: 600;
+}
+
+.stage-name-input {
+  width: 100%;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin-top: 6px;
+}
+
+.stage-name-input:focus {
+  outline: none;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 2px rgba(62, 207, 142, 0.15);
+}
+
+.stage-prompt {
+  width: 100%;
+  min-height: 70px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.stage-prompt:focus {
+  outline: none;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 2px rgba(62, 207, 142, 0.15);
+}
+
+.stage-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px dashed var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.stage-member-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-primary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: grab;
+}
+
+.stage-member-chip:active {
+  cursor: grabbing;
+}
+
+.stage-member-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.stage-card .remove-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .members-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

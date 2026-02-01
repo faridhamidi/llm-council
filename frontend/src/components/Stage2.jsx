@@ -14,7 +14,13 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
+export default function Stage2({
+  rankings,
+  labelToModel,
+  aggregateRankings,
+  stageName = 'Peer Rankings',
+  stagePrompt = '',
+}) {
   const [activeTab, setActiveTab] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -62,7 +68,8 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <h3 className="stage-title">{stageName}</h3>
+      {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
 
       <h4>Raw Evaluations</h4>
       <p className="stage-description">
