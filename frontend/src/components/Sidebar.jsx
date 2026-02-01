@@ -25,6 +25,8 @@ export default function Sidebar({
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [draggedStageIndex, setDraggedStageIndex] = useState(null);
   const [draggedMember, setDraggedMember] = useState(null);
+  const [dragOverMember, setDragOverMember] = useState(null); // { stageId, memberIndex }
+  const [dragOverStage, setDragOverStage] = useState(null); // stageIndex (for stage sort) or stageId (for member drop)
   const [councilPresets, setCouncilPresets] = useState([]);
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [presetNameInput, setPresetNameInput] = useState('');
@@ -102,6 +104,8 @@ export default function Sidebar({
       use_system_prompt_stage2: settings.use_system_prompt_stage2 ?? true,
       use_system_prompt_stage3: settings.use_system_prompt_stage3 ?? true,
       stages: normalizedStages,
+      // Chairman handles follow-ups (context level still configurable)
+      speaker_context_level: settings.speaker_context_level || 'full',
     };
   };
 
@@ -235,6 +239,33 @@ export default function Sidebar({
     });
   };
 
+  const handleAddMemberToStage = (stageId) => {
+    setCouncilSettings((prev) => {
+      if (!prev) return prev;
+      const maxMembers = prev.max_members || 7;
+      if (prev.members.length >= maxMembers) return prev;
+      const stage = (prev.stages || []).find((s) => s.id === stageId);
+      if (!stage || stage.member_ids.length >= 5) return prev;
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `member-${Date.now()}`;
+      const defaultModel = councilModels[0]?.id || '';
+      const newMember = {
+        id: newId,
+        alias: `Member ${prev.members.length + 1}`,
+        model_id: defaultModel,
+        system_prompt: '',
+      };
+      const nextMembers = [...prev.members, newMember];
+      const nextStages = (prev.stages || []).map((s) =>
+        s.id === stageId
+          ? { ...s, member_ids: [...s.member_ids, newId] }
+          : s
+      );
+      return { ...prev, members: nextMembers, stages: nextStages };
+    });
+  };
+
   const handleRemoveMember = (memberId) => {
     setCouncilSettings((prev) => {
       if (!prev) return prev;
@@ -244,7 +275,11 @@ export default function Sidebar({
         prev.chairman_id === memberId && nextMembers.length
           ? nextMembers[0].id
           : prev.chairman_id;
-      return { ...prev, members: nextMembers, chairman_id: nextChairman };
+      const nextStages = (prev.stages || []).map((stage) => ({
+        ...stage,
+        member_ids: stage.member_ids.filter((id) => id !== memberId),
+      }));
+      return { ...prev, members: nextMembers, chairman_id: nextChairman, stages: nextStages };
     });
   };
 
@@ -292,9 +327,26 @@ export default function Sidebar({
     setDraggedMember({ memberId, stageId });
   };
 
-  const handleMemberDrop = (targetStageId) => {
+  const handleMemberDrop = (targetStageId, targetMemberIndex = null) => {
     setCouncilSettings((prev) => {
       if (!prev || !draggedMember) return prev;
+
+      // If dropping on the same stage, reorder within the stage
+      if (draggedMember.stageId === targetStageId && targetMemberIndex !== null) {
+        const nextStages = (prev.stages || []).map((stage) => {
+          if (stage.id !== targetStageId) return stage;
+          const memberIds = [...stage.member_ids];
+          const currentIndex = memberIds.indexOf(draggedMember.memberId);
+          if (currentIndex === -1 || currentIndex === targetMemberIndex) return stage;
+          // Remove from current position and insert at target
+          memberIds.splice(currentIndex, 1);
+          memberIds.splice(targetMemberIndex, 0, draggedMember.memberId);
+          return { ...stage, member_ids: memberIds };
+        });
+        return { ...prev, stages: nextStages };
+      }
+
+      // Moving between different stages
       if (draggedMember.stageId === targetStageId) return prev;
       const nextStages = (prev.stages || []).map((stage) => {
         if (stage.id === draggedMember.stageId) {
@@ -368,6 +420,8 @@ export default function Sidebar({
         use_system_prompt_stage2: nextSettings.use_system_prompt_stage2 ?? true,
         use_system_prompt_stage3: nextSettings.use_system_prompt_stage3 ?? true,
         stages: nextSettings.stages || [],
+        // Chairman handles follow-ups (context level still configurable)
+        speaker_context_level: nextSettings.speaker_context_level || 'full',
       };
       await api.updateCouncilSettings(payload);
       setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
@@ -523,9 +577,8 @@ export default function Sidebar({
           conversations.map((conv) => (
             <div
               key={conv.id}
-              className={`conversation-item ${
-                conv.id === currentConversationId ? 'active' : ''
-              }`}
+              className={`conversation-item ${conv.id === currentConversationId ? 'active' : ''
+                }`}
               onClick={() => onSelectConversation(conv.id)}
             >
               <div className="conversation-row">
@@ -641,6 +694,21 @@ export default function Sidebar({
                     </label>
                   </div>
                   <div className="control-row">
+                    <span className="control-label">Chairman Context</span>
+                    <select
+                      className="control-input"
+                      value={councilSettings.speaker_context_level || 'full'}
+                      onChange={(event) =>
+                        setCouncilSettings((prev) => ({ ...prev, speaker_context_level: event.target.value }))
+                      }
+                    >
+                      <option value="minimal">Minimal (Final synthesis only)</option>
+                      <option value="standard">Standard (Synthesis + queries)</option>
+                      <option value="full">Full (All stages + rankings)</option>
+                    </select>
+                    <span className="control-help">Context given to Chairman for follow-up questions</span>
+                  </div>
+                  <div className="control-row">
                     <span className="control-label">Save Preset</span>
                     <input
                       className="control-input"
@@ -688,108 +756,226 @@ export default function Sidebar({
                 <div className="token-status">Loading settings...</div>
               ) : (
                 <>
-                  <div className="info-text">
-                    → Drag cards to reorder. Updates apply to new messages immediately after saving.
-                  </div>
                   <div className="info-text stage-info">
-                    → Stage builder: drag members between stages, drag stages to reorder, and set prompt + execution mode.
+                    → Configure members directly within each stage. Drag to reorder stages or move members between stages.
                   </div>
                   <div className="stages-header">
                     <div>
                       <div className="section-title">Council Flow</div>
-                      <div className="section-subtitle">Up to 10 stages, 5 members per stage.</div>
+                      <div className="section-subtitle">
+                        Up to 10 stages • {councilSettings.members.length} / {councilSettings.max_members || 7} total members
+                      </div>
                     </div>
                     <button
                       className="small-btn"
                       onClick={handleAddStage}
                       disabled={(councilSettings.stages || []).length >= 10}
                     >
-                      Add Stage
+                      + Add Stage
                     </button>
                   </div>
-                  <div className="stages-grid">
+                  <div className="stages-container">
                     {(councilSettings.stages || []).map((stage, stageIndex) => (
                       <div
                         key={stage.id}
-                        className="stage-card"
+                        className={`stage-card-row ${draggedStageIndex === stageIndex ? 'dragging' : ''} ${(dragOverStage === stageIndex && draggedStageIndex !== null && draggedStageIndex !== stageIndex) ||
+                          (dragOverStage === stage.id && draggedMember && draggedMember.stageId !== stage.id)
+                          ? 'drag-over'
+                          : ''
+                          }`}
                         draggable
                         onDragStart={() => handleStageDragStart(stageIndex)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => handleStageDrop(stageIndex)}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          // Handle stage reordering feedback
+                          if (draggedStageIndex !== null && draggedStageIndex !== stageIndex) {
+                            setDragOverStage(stageIndex);
+                          }
+                          // Handle member drop feedback
+                          if (draggedMember && draggedMember.stageId !== stage.id) {
+                            setDragOverStage(stage.id);
+                          }
+                        }}
+                        onDragLeave={() => setDragOverStage(null)}
+                        onDrop={() => {
+                          if (draggedStageIndex !== null) {
+                            handleStageDrop(stageIndex);
+                          } else if (draggedMember) {
+                            handleMemberDrop(stage.id);
+                          }
+                          setDragOverStage(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedStageIndex(null);
+                          setDragOverStage(null);
+                        }}
                       >
-                        <div className="stage-card-header">
-                          <div>
-                            <div className="stage-kicker">Stage {stageIndex + 1}</div>
-                            <input
-                              type="text"
-                              className="stage-name-input"
-                              value={stage.name}
-                              onChange={(event) => updateStage(stage.id, { name: event.target.value })}
-                            />
+                        <div className="stage-row-header">
+                          <div className="stage-header-left">
+                            <div className="stage-drag-handle">⋮⋮</div>
+                            <div>
+                              <div className="stage-kicker">Stage {stageIndex + 1}</div>
+                              <input
+                                type="text"
+                                className="stage-name-input"
+                                value={stage.name}
+                                onChange={(event) => updateStage(stage.id, { name: event.target.value })}
+                                placeholder="Stage name"
+                              />
+                            </div>
                           </div>
-                          <button
-                            className="remove-btn"
-                            onClick={() => handleRemoveStage(stage.id)}
-                            title="Remove stage"
-                            disabled={(councilSettings.stages || []).length <= 1}
-                          >
-                            ×
-                          </button>
-                        </div>
-                        <label className="member-label" htmlFor={`stage-${stage.id}-mode`}>
-                          Execution
-                        </label>
-                        <select
-                          id={`stage-${stage.id}-mode`}
-                          className="control-input"
-                          value={stage.execution_mode}
-                          onChange={(event) => updateStage(stage.id, { execution_mode: event.target.value })}
-                        >
-                          <option value="parallel">Parallel</option>
-                          <option value="sequential">Sequential</option>
-                        </select>
-                        <label className="member-label" htmlFor={`stage-${stage.id}-prompt`}>
-                          Stage prompt (visible in chat)
-                        </label>
-                        <textarea
-                          id={`stage-${stage.id}-prompt`}
-                          className="stage-prompt"
-                          rows={3}
-                          value={stage.prompt || ''}
-                          onChange={(event) => updateStage(stage.id, { prompt: event.target.value })}
-                          placeholder="Optional guidance. Supports {question}, {responses}, {response_count}, {response_labels}, {stage1}, {stage2}."
-                        />
-                        <div className="stage-member-hint">
-                          {stage.member_ids.length} / 5 members assigned.
-                        </div>
-                        <div
-                          className="stage-members"
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={() => handleMemberDrop(stage.id)}
-                        >
-                          {stage.member_ids.map((memberId) => {
-                            const member = councilSettings.members.find((entry) => entry.id === memberId);
-                            if (!member) return null;
-                            return (
-                              <div
-                                key={memberId}
-                                className="stage-member-chip"
-                                draggable
-                                onDragStart={() => handleMemberDragStart(memberId, stage.id)}
-                                onDragEnd={() => setDraggedMember(null)}
+                          <div className="stage-header-controls">
+                            <div className="stage-control-group">
+                              <label className="control-label-inline" htmlFor={`stage-${stage.id}-mode`}>
+                                Execution:
+                              </label>
+                              <select
+                                id={`stage-${stage.id}-mode`}
+                                className="control-input-inline"
+                                value={stage.execution_mode}
+                                onChange={(event) => updateStage(stage.id, { execution_mode: event.target.value })}
                               >
-                                <span>{member.alias}</span>
-                              </div>
-                            );
-                          })}
+                                <option value="parallel">Parallel</option>
+                                <option value="sequential">Sequential</option>
+                              </select>
+                            </div>
+                            <button
+                              className="remove-btn"
+                              onClick={() => handleRemoveStage(stage.id)}
+                              title="Remove stage"
+                              disabled={(councilSettings.stages || []).length <= 1}
+                            >
+                              ×
+                            </button>
+                          </div>
                         </div>
-                        <div className="stage-member-hint">
-                          Drag members here (max 5).
+                        <div className="stage-prompt-section">
+                          <label className="member-label" htmlFor={`stage-${stage.id}-prompt`}>
+                            Stage prompt (optional, visible in chat)
+                          </label>
+                          <textarea
+                            id={`stage-${stage.id}-prompt`}
+                            className="stage-prompt"
+                            rows={2}
+                            value={stage.prompt || ''}
+                            onChange={(event) => updateStage(stage.id, { prompt: event.target.value })}
+                            placeholder="Optional guidance. Supports {question}, {responses}, {response_count}, {response_labels}, {stage1}, {stage2}."
+                          />
+                        </div>
+                        <div className="stage-members-section">
+                          <div className="stage-members-header">
+                            <span className="member-label">Members ({stage.member_ids.length} / 5)</span>
+                          </div>
+                          <div
+                            className="stage-members-grid"
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={() => handleMemberDrop(stage.id)}
+                          >
+                            {stage.member_ids.map((memberId, memberIndex) => {
+                              const member = councilSettings.members.find((entry) => entry.id === memberId);
+                              if (!member) return null;
+                              const isDragOver = dragOverMember?.stageId === stage.id && dragOverMember?.memberIndex === memberIndex;
+                              return (
+                                <div
+                                  key={memberId}
+                                  className={`member-card-inline ${draggedMember?.memberId === memberId ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    handleMemberDragStart(memberId, stage.id);
+                                  }}
+                                  onDragEnd={(e) => {
+                                    e.stopPropagation();
+                                    setDraggedMember(null);
+                                    setDragOverMember(null);
+                                  }}
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (draggedMember && draggedMember.stageId === stage.id && draggedMember.memberId !== memberId) {
+                                      setDragOverMember({ stageId: stage.id, memberIndex });
+                                    }
+                                  }}
+                                  onDragLeave={(e) => {
+                                    e.stopPropagation();
+                                    setDragOverMember(null);
+                                  }}
+                                  onDrop={(e) => {
+                                    e.stopPropagation();
+                                    handleMemberDrop(stage.id, memberIndex);
+                                    setDragOverMember(null);
+                                  }}
+                                >
+                                  <div className="member-card-inline-header">
+                                    <span className="member-number">{memberIndex + 1}</span>
+                                    <input
+                                      type="text"
+                                      className="member-alias-inline"
+                                      value={member.alias}
+                                      onChange={(event) => updateMember(member.id, { alias: event.target.value })}
+                                      placeholder="Member alias"
+                                    />
+                                    <button
+                                      className="remove-btn-small"
+                                      onClick={() => handleRemoveMember(member.id)}
+                                      title="Remove member"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                  <select
+                                    className="member-model-inline"
+                                    value={member.model_id}
+                                    onChange={(event) => updateMember(member.id, { model_id: event.target.value })}
+                                  >
+                                    {councilModels.map((model) => (
+                                      <option key={model.id} value={model.id}>
+                                        {model.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <textarea
+                                    className="member-prompt-inline"
+                                    rows={2}
+                                    value={member.system_prompt || ''}
+                                    onChange={(event) =>
+                                      updateMember(member.id, { system_prompt: event.target.value })
+                                    }
+                                    placeholder="System prompt (optional)..."
+                                  />
+                                  {/* Chairman button only shows in the final stage */}
+                                  {stageIndex === (councilSettings.stages || []).length - 1 && (
+                                    <button
+                                      className={`chairman-btn-inline ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
+                                      onClick={() =>
+                                        setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
+                                      }
+                                      title={councilSettings.chairman_id === member.id ? 'Chairman (consolidates & handles follow-ups)' : 'Set as Chairman'}
+                                    >
+                                      {councilSettings.chairman_id === member.id ? '★ Chairman' : 'Set Chairman'}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <button
+                              className="add-member-btn-inline"
+                              onClick={() => handleAddMemberToStage(stage.id)}
+                              disabled={
+                                stage.member_ids.length >= 5 ||
+                                councilSettings.members.length >= (councilSettings.max_members || 7)
+                              }
+                              title="Add member to this stage"
+                            >
+                              <span className="add-icon-inline">+</span>
+                              <span>Add Member</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div className="members-grid">
+                  <div className="members-grid" style={{ display: 'none' }}>
                     {councilSettings.members.map((member, index) => (
                       <div
                         key={member.id}

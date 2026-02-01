@@ -22,6 +22,7 @@ function App() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isSettingPin, setIsSettingPin] = useState(false);
+  const [remainingMessages, setRemainingMessages] = useState(null);
   const conversationCacheRef = useRef({});
   const currentConversationIdRef = useRef(null);
   const currentConversationRef = useRef(null);
@@ -299,112 +300,112 @@ function App() {
         targetConversationId,
         content,
         (eventType, event) => {
-        switch (eventType) {
-          case 'stage1_start':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage1 = true;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+          switch (eventType) {
+            case 'stage1_start':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage1 = true;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'stage1_complete':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                lastMsg.stage1 = event.data;
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage1 = false;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+            case 'stage1_complete':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  lastMsg.stage1 = event.data;
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage1 = false;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'stage2_start':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage2 = true;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+            case 'stage2_start':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage2 = true;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'stage2_complete':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                lastMsg.stage2 = event.data;
-                lastMsg.metadata = event.metadata;
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage2 = false;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+            case 'stage2_complete':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  lastMsg.stage2 = event.data;
+                  lastMsg.metadata = event.metadata;
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage2 = false;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'stage3_start':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage3 = true;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+            case 'stage3_start':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage3 = true;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'stage3_complete':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                lastMsg.stage3 = event.data;
-                if (lastMsg.loading) {
-                  lastMsg.loading.stage3 = false;
-                }
-                return lastMsg;
-              })
-            );
-            break;
+            case 'stage3_complete':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  lastMsg.stage3 = event.data;
+                  if (lastMsg.loading) {
+                    lastMsg.loading.stage3 = false;
+                  }
+                  return lastMsg;
+                })
+              );
+              break;
 
-          case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
-            break;
+            case 'title_complete':
+              // Reload conversations to get updated title
+              loadConversations();
+              break;
 
-          case 'complete':
-            // Stream complete, reload conversations list
-            loadConversations();
-            setStreamController(null);
-            setStreamingConversationId(null);
-            break;
+            case 'complete':
+              // Stream complete, reload conversations list
+              loadConversations();
+              setStreamController(null);
+              setStreamingConversationId(null);
+              break;
 
-          case 'error':
-            console.error('Stream error:', event.message);
-            setStreamController(null);
-            setStreamingConversationId(null);
-            break;
-          case 'cancelled':
-            updateConversationById(targetConversationId, (prev) =>
-              updateLastAssistantMessage(prev, (lastMsg) => {
-                if (lastMsg?.loading) {
-                  lastMsg.loading.stage1 = false;
-                  lastMsg.loading.stage2 = false;
-                  lastMsg.loading.stage3 = false;
-                }
-                return lastMsg;
-              })
-            );
-            setStreamController(null);
-            setStreamingConversationId(null);
-            break;
+            case 'error':
+              console.error('Stream error:', event.message);
+              setStreamController(null);
+              setStreamingConversationId(null);
+              break;
+            case 'cancelled':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  if (lastMsg?.loading) {
+                    lastMsg.loading.stage1 = false;
+                    lastMsg.loading.stage2 = false;
+                    lastMsg.loading.stage3 = false;
+                  }
+                  return lastMsg;
+                })
+              );
+              setStreamController(null);
+              setStreamingConversationId(null);
+              break;
 
-          default:
-            console.log('Unknown event type:', eventType);
-        }
+            default:
+              console.log('Unknown event type:', eventType);
+          }
         },
         { signal: controller.signal }
       );
@@ -441,6 +442,19 @@ function App() {
       api.cancelMessageStream(streamingConversationId).catch((error) => {
         console.error('Failed to cancel stream:', error);
       });
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!currentConversationId) return;
+    try {
+      const response = await api.retryMessage(currentConversationId);
+      if (response.remaining_messages !== undefined) {
+        setRemainingMessages(response.remaining_messages);
+      }
+      loadConversation(currentConversationId);
+    } catch (error) {
+      console.error('Failed to retry message:', error);
     }
   };
 
@@ -535,7 +549,9 @@ function App() {
           conversation={currentConversation}
           onSendMessage={handleSendMessage}
           onStop={handleStop}
+          onRetry={handleRetry}
           isLoading={streamingConversationId === currentConversationId}
+          remainingMessages={remainingMessages}
         />
       </div>
       <button

@@ -13,12 +13,13 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
-def create_conversation(conversation_id: str) -> Dict[str, Any]:
+def create_conversation(conversation_id: str, settings_snapshot: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """
-    Create a new conversation.
+    Create a new conversation with optional settings snapshot.
 
     Args:
         conversation_id: Unique identifier for the conversation
+        settings_snapshot: Optional council settings to lock for this conversation
 
     Returns:
         New conversation dict
@@ -29,12 +30,13 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "created_at": created_at,
         "title": "New Conversation",
         "messages": [],
+        "settings_snapshot": settings_snapshot,
     }
 
     with with_connection() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, created_at, title, deleted_at) VALUES (?, ?, ?, NULL)",
-            (conversation_id, created_at, conversation["title"]),
+            "INSERT INTO conversations (id, created_at, title, deleted_at, settings_snapshot) VALUES (?, ?, ?, NULL, ?)",
+            (conversation_id, created_at, conversation["title"], json.dumps(settings_snapshot) if settings_snapshot else None),
         )
         conn.commit()
 
@@ -53,7 +55,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """
     with with_connection() as conn:
         row = conn.execute(
-            "SELECT id, created_at, title FROM conversations WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, created_at, title, settings_snapshot FROM conversations WHERE id = ? AND deleted_at IS NULL",
             (conversation_id,),
         ).fetchone()
         if row is None:
@@ -61,7 +63,8 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 
         messages_rows = conn.execute(
             """
-            SELECT role, content, stage1_json, stage2_json, stage3_json, stages_json, created_at
+            SELECT role, content, stage1_json, stage2_json, stage3_json, stages_json,
+                   message_type, token_count, speaker_response, created_at
             FROM messages
             WHERE conversation_id = ?
             ORDER BY id ASC
@@ -70,27 +73,51 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         ).fetchall()
 
     messages: List[Dict[str, Any]] = []
+    total_tokens = 0
     for msg in messages_rows:
+        token_count = msg["token_count"] or 0
+        total_tokens += token_count
         if msg["role"] == "user":
-            messages.append({"role": "user", "content": msg["content"]})
-        else:
-            stage1 = json.loads(msg["stage1_json"]) if msg["stage1_json"] else None
-            stage2 = json.loads(msg["stage2_json"]) if msg["stage2_json"] else None
-            stage3 = json.loads(msg["stage3_json"]) if msg["stage3_json"] else None
-            stages = json.loads(msg["stages_json"]) if msg["stages_json"] else None
             messages.append({
-                "role": "assistant",
-                "stage1": stage1,
-                "stage2": stage2,
-                "stage3": stage3,
-                "stages": stages,
+                "role": "user",
+                "content": msg["content"],
+                "token_count": token_count,
             })
+        else:
+            message_type = msg["message_type"] or "council"
+            if message_type == "speaker":
+                # Speaker response (follow-up)
+                messages.append({
+                    "role": "assistant",
+                    "message_type": "speaker",
+                    "response": msg["speaker_response"],
+                    "token_count": token_count,
+                })
+            else:
+                # Council response (full stages)
+                stage1 = json.loads(msg["stage1_json"]) if msg["stage1_json"] else None
+                stage2 = json.loads(msg["stage2_json"]) if msg["stage2_json"] else None
+                stage3 = json.loads(msg["stage3_json"]) if msg["stage3_json"] else None
+                stages = json.loads(msg["stages_json"]) if msg["stages_json"] else None
+                messages.append({
+                    "role": "assistant",
+                    "message_type": "council",
+                    "stage1": stage1,
+                    "stage2": stage2,
+                    "stage3": stage3,
+                    "stages": stages,
+                    "token_count": token_count,
+                })
 
+    settings_snapshot = json.loads(row["settings_snapshot"]) if row["settings_snapshot"] else None
+    
     return {
         "id": row["id"],
         "created_at": row["created_at"],
         "title": row["title"],
         "messages": messages,
+        "settings_snapshot": settings_snapshot,
+        "total_tokens": total_tokens,
     }
 
 
@@ -123,21 +150,22 @@ def list_conversations() -> List[Dict[str, Any]]:
     ]
 
 
-def add_user_message(conversation_id: str, content: str) -> None:
+def add_user_message(conversation_id: str, content: str, token_count: int = 0) -> None:
     """
     Add a user message to a conversation.
 
     Args:
         conversation_id: Conversation identifier
         content: User message content
+        token_count: Estimated token count for this message
     """
     with with_connection() as conn:
         conn.execute(
             """
-            INSERT INTO messages (conversation_id, role, content, created_at)
-            VALUES (?, 'user', ?, ?)
+            INSERT INTO messages (conversation_id, role, content, token_count, created_at)
+            VALUES (?, 'user', ?, ?, ?)
             """,
-            (conversation_id, content, _now_iso()),
+            (conversation_id, content, token_count, _now_iso()),
         )
         conn.commit()
 
@@ -148,9 +176,10 @@ def add_assistant_message(
     stage2: List[Dict[str, Any]],
     stage3: Dict[str, Any],
     stages: List[Dict[str, Any]] | None = None,
+    token_count: int = 0,
 ) -> None:
     """
-    Add an assistant message with all 3 stages to a conversation.
+    Add an assistant message with all 3 stages to a conversation (council response).
 
     Args:
         conversation_id: Conversation identifier
@@ -158,12 +187,13 @@ def add_assistant_message(
         stage2: List of model rankings
         stage3: Final synthesized response
         stages: Full stage outputs
+        token_count: Estimated token count for this message
     """
     with with_connection() as conn:
         conn.execute(
             """
-            INSERT INTO messages (conversation_id, role, stage1_json, stage2_json, stage3_json, stages_json, created_at)
-            VALUES (?, 'assistant', ?, ?, ?, ?, ?)
+            INSERT INTO messages (conversation_id, role, message_type, stage1_json, stage2_json, stage3_json, stages_json, token_count, created_at)
+            VALUES (?, 'assistant', 'council', ?, ?, ?, ?, ?, ?)
             """,
             (
                 conversation_id,
@@ -171,10 +201,82 @@ def add_assistant_message(
                 json.dumps(stage2),
                 json.dumps(stage3),
                 json.dumps(stages) if stages is not None else None,
+                token_count,
                 _now_iso(),
             ),
         )
         conn.commit()
+
+
+def add_speaker_message(
+    conversation_id: str,
+    response: str,
+    token_count: int = 0,
+) -> None:
+    """
+    Add a speaker follow-up response to a conversation.
+
+    Args:
+        conversation_id: Conversation identifier
+        response: Speaker response text
+        token_count: Estimated token count for this message
+    """
+    with with_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO messages (conversation_id, role, message_type, speaker_response, token_count, created_at)
+            VALUES (?, 'assistant', 'speaker', ?, ?, ?)
+            """,
+            (
+                conversation_id,
+                response,
+                token_count,
+                _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def save_settings_snapshot(conversation_id: str, settings: Dict[str, Any]) -> None:
+    """
+    Save settings snapshot for an existing conversation.
+
+    Args:
+        conversation_id: Conversation identifier
+        settings: Council settings to snapshot
+    """
+    with with_connection() as conn:
+        conn.execute(
+            "UPDATE conversations SET settings_snapshot = ? WHERE id = ?",
+            (json.dumps(settings), conversation_id),
+        )
+        conn.commit()
+
+
+def delete_last_assistant_message(conversation_id: str) -> bool:
+    """
+    Delete the last assistant message for retry functionality.
+
+    Args:
+        conversation_id: Conversation identifier
+
+    Returns:
+        True if deleted, False if no message found
+    """
+    with with_connection() as conn:
+        # Find and delete the last assistant message
+        cursor = conn.execute(
+            """
+            DELETE FROM messages WHERE id = (
+                SELECT id FROM messages
+                WHERE conversation_id = ? AND role = 'assistant'
+                ORDER BY id DESC LIMIT 1
+            )
+            """,
+            (conversation_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def update_conversation_title(conversation_id: str, title: str) -> None:

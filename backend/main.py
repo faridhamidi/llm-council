@@ -18,6 +18,8 @@ from .config import (
     set_bedrock_region,
     BEDROCK_REGION_OPTIONS,
     list_converse_models_for_region,
+    MAX_FOLLOW_UP_MESSAGES,
+    SPEAKER_CONTEXT_LEVELS,
 )
 from .council_settings import (
     get_settings,
@@ -34,7 +36,16 @@ from .council_presets import (
     find_preset,
     delete_preset,
 )
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import (
+    run_full_council,
+    generate_conversation_title,
+    stage1_collect_responses,
+    stage2_collect_rankings,
+    stage3_synthesize_final,
+    calculate_aggregate_rankings,
+    query_council_speaker,
+    estimate_token_count,
+)
 
 app = FastAPI(title="LLM Council API")
 DISABLE_APP_PIN = os.getenv("DISABLE_APP_PIN", "").lower() in {"1", "true", "yes"}
@@ -276,8 +287,9 @@ async def restore_conversation(conversation_id: str):
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, payload: SendMessageRequest, http_request: Request):
     """
-    Send a message and run the 3-stage council process.
-    Returns the complete response with all stages.
+    Send a message to a conversation.
+    - First message: Run full council process
+    - Follow-up messages: Query council speaker only
     """
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
@@ -287,41 +299,243 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    # Add user message
-    storage.add_user_message(conversation_id, payload.content)
-
-    # If this is the first message, generate a title
-    if is_first_message:
-        title = await generate_conversation_title(payload.content)
-        storage.update_conversation_title(conversation_id, title)
-
     session_id = http_request.state.session_id
     bedrock_key = session_store.get_bedrock_key(session_id)
     if not bedrock_key:
         raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
-        payload.content,
-        api_key=bedrock_key,
-    )
+    # Estimate tokens for user message
+    user_token_count = estimate_token_count(payload.content)
+    
+    # Add user message
+    storage.add_user_message(conversation_id, payload.content, token_count=user_token_count)
 
-    # Add assistant message with all stages
-    storage.add_assistant_message(
-        conversation_id,
-        stage1_results,
-        stage2_results,
-        stage3_result,
-        stages=stages,
-    )
+    if is_first_message:
+        # First message: Run full council process
+        
+        # Generate title in parallel
+        title = await generate_conversation_title(payload.content, api_key=bedrock_key)
+        storage.update_conversation_title(conversation_id, title)
 
-    # Return the complete response with metadata
+        # Snapshot current settings for this conversation
+        current_settings = get_settings()
+        storage.save_settings_snapshot(conversation_id, current_settings)
+
+        # Run the 3-stage council process
+        stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
+            payload.content,
+            api_key=bedrock_key,
+        )
+
+        # Estimate tokens for response
+        response_tokens = estimate_token_count(str(stage3_result.get("response", "")))
+
+        # Add assistant message with all stages
+        storage.add_assistant_message(
+            conversation_id,
+            stage1_results,
+            stage2_results,
+            stage3_result,
+            stages=stages,
+            token_count=response_tokens,
+        )
+
+        # Refresh conversation to get updated data
+        updated_conversation = storage.get_conversation(conversation_id)
+
+        # Return the complete response with metadata
+        return {
+            "message_type": "council",
+            "stage1": stage1_results,
+            "stage2": stage2_results,
+            "stage3": stage3_result,
+            "metadata": metadata,
+            "stages": stages,
+            "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
+    else:
+        # Follow-up message: Use council speaker
+        
+        # Count user messages to check limit (exclude the one we just added)
+        user_message_count = sum(1 for msg in conversation["messages"] if msg.get("role") == "user")
+        
+        if user_message_count >= MAX_FOLLOW_UP_MESSAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message limit reached. Maximum {MAX_FOLLOW_UP_MESSAGES} follow-up messages per conversation."
+            )
+        
+        # Get settings snapshot (or current settings as fallback)
+        settings = conversation.get("settings_snapshot") or get_settings()
+        
+        # Refresh conversation to include the new user message
+        conversation = storage.get_conversation(conversation_id)
+        
+        # Query the council speaker
+        speaker_response = await query_council_speaker(
+            payload.content,
+            conversation["messages"],
+            settings,
+            api_key=bedrock_key,
+        )
+        
+        # Add speaker message
+        storage.add_speaker_message(
+            conversation_id,
+            speaker_response.get("response", ""),
+            token_count=speaker_response.get("token_count", 0),
+        )
+        
+        # Calculate remaining messages
+        remaining = MAX_FOLLOW_UP_MESSAGES - user_message_count - 1
+        
+        # Refresh conversation to get updated token count
+        updated_conversation = storage.get_conversation(conversation_id)
+        
+        return {
+            "message_type": "speaker",
+            "model": speaker_response.get("model"),
+            "response": speaker_response.get("response"),
+            "error": speaker_response.get("error", False),
+            "remaining_messages": remaining,
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
+
+
+@app.post("/api/conversations/{conversation_id}/message/retry")
+async def retry_message(conversation_id: str, http_request: Request):
+    """
+    Retry the last message by deleting it and re-running the query.
+    """
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    messages = conversation.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="No messages to retry")
+    
+    # Find the last user message and corresponding assistant message
+    last_user_msg = None
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user_msg = msg
+            break
+    
+    if not last_user_msg:
+        raise HTTPException(status_code=400, detail="No user message to retry")
+    
+    # Delete the last assistant message
+    storage.delete_last_assistant_message(conversation_id)
+    
+    # Re-run with the same content
+    class RetryPayload:
+        content = last_user_msg.get("content", "")
+    
+    # Use the send_message logic but skip adding the user message
+    session_id = http_request.state.session_id
+    bedrock_key = session_store.get_bedrock_key(session_id)
+    if not bedrock_key:
+        raise HTTPException(status_code=400, detail="Bedrock key not set for this session.")
+    
+    # Refresh conversation
+    conversation = storage.get_conversation(conversation_id)
+    settings = conversation.get("settings_snapshot") or get_settings()
+    
+    # Determine if this was a council or speaker response
+    user_message_count = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
+    
+    if user_message_count == 1:
+        # This was the first message - retry full council
+        stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
+            last_user_msg.get("content", ""),
+            api_key=bedrock_key,
+        )
+        
+        response_tokens = estimate_token_count(str(stage3_result.get("response", "")))
+        storage.add_assistant_message(
+            conversation_id,
+            stage1_results,
+            stage2_results,
+            stage3_result,
+            stages=stages,
+            token_count=response_tokens,
+        )
+        
+        updated_conversation = storage.get_conversation(conversation_id)
+        return {
+            "message_type": "council",
+            "stage1": stage1_results,
+            "stage2": stage2_results,
+            "stage3": stage3_result,
+            "metadata": metadata,
+            "stages": stages,
+            "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
+    else:
+        # This was a follow-up - retry speaker query
+        speaker_response = await query_council_speaker(
+            last_user_msg.get("content", ""),
+            conversation["messages"],
+            settings,
+            api_key=bedrock_key,
+        )
+        
+        storage.add_speaker_message(
+            conversation_id,
+            speaker_response.get("response", ""),
+            token_count=speaker_response.get("token_count", 0),
+        )
+        
+        remaining = MAX_FOLLOW_UP_MESSAGES - user_message_count
+        updated_conversation = storage.get_conversation(conversation_id)
+        
+        return {
+            "message_type": "speaker",
+            "model": speaker_response.get("model"),
+            "response": speaker_response.get("response"),
+            "error": speaker_response.get("error", False),
+            "remaining_messages": remaining,
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
+
+
+@app.get("/api/conversations/{conversation_id}/info")
+async def get_conversation_info(conversation_id: str):
+    """
+    Get conversation metadata including remaining messages and token count.
+    """
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    messages = conversation.get("messages", [])
+    user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
+    
+    # First message doesn't count against limit
+    follow_up_count = max(0, user_message_count - 1)
+    remaining = MAX_FOLLOW_UP_MESSAGES - follow_up_count
+    
     return {
-        "stage1": stage1_results,
-        "stage2": stage2_results,
-        "stage3": stage3_result,
-        "metadata": metadata,
-        "stages": stages,
+        "id": conversation.get("id"),
+        "title": conversation.get("title"),
+        "message_count": len(messages),
+        "user_message_count": user_message_count,
+        "remaining_messages": remaining,
+        "max_follow_up_messages": MAX_FOLLOW_UP_MESSAGES,
+        "total_tokens": conversation.get("total_tokens", 0),
+        "has_settings_snapshot": conversation.get("settings_snapshot") is not None,
+    }
+
+
+@app.get("/api/settings/speaker-context-levels")
+async def get_speaker_context_levels():
+    """Get available speaker context level options."""
+    return {
+        "levels": SPEAKER_CONTEXT_LEVELS,
+        "default": "full",
     }
 
 

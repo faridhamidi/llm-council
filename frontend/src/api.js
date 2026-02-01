@@ -239,6 +239,35 @@ export const api = {
   },
 
   /**
+   * Retry the last message in a conversation.
+   */
+  async retryMessage(conversationId) {
+    const response = await apiFetch(`/api/conversations/${conversationId}/message/retry`, {
+      method: 'POST',
+      headers: withAuth({
+        'Content-Type': 'application/json',
+      }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to retry message');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get conversation info including remaining messages and token count.
+   */
+  async getConversationInfo(conversationId) {
+    const response = await apiFetch(`/api/conversations/${conversationId}/info`, {
+      headers: withAuth(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to get conversation info');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message and receive streaming updates.
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content

@@ -27,6 +27,23 @@ def _ensure_stages_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN stages_json TEXT")
 
 
+def _ensure_multiturn_columns(conn: sqlite3.Connection) -> None:
+    """Ensure columns for multi-turn conversation support exist."""
+    # Check conversations table for settings_snapshot
+    conv_columns = [row["name"] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+    if "settings_snapshot" not in conv_columns:
+        conn.execute("ALTER TABLE conversations ADD COLUMN settings_snapshot TEXT")
+    
+    # Check messages table for message_type, token_count, speaker_response
+    msg_columns = [row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()]
+    if "message_type" not in msg_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'council'")
+    if "token_count" not in msg_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN token_count INTEGER")
+    if "speaker_response" not in msg_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN speaker_response TEXT")
+
+
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -294,6 +311,7 @@ def init_db() -> None:
         )
         _migrate_from_json(conn)
         _ensure_stages_column(conn)
+        _ensure_multiturn_columns(conn)
         conn.commit()
     finally:
         conn.close()

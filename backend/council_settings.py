@@ -13,6 +13,7 @@ from .config import (
     CHAIRMAN_ALIAS,
     TITLE_MODEL,
     resolve_model_for_region,
+    DEFAULT_SPEAKER_CONTEXT_LEVEL,
 )
 from .db import with_connection
 
@@ -147,6 +148,8 @@ def _default_settings() -> Dict[str, Any]:
         "title_model_id": TITLE_MODEL,
         "use_system_prompt_stage2": True,
         "use_system_prompt_stage3": True,
+        # Multi-turn conversation settings (Chairman handles follow-ups)
+        "speaker_context_level": DEFAULT_SPEAKER_CONTEXT_LEVEL,
     }
     return ensure_stage_config(settings)
 
@@ -167,6 +170,14 @@ def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
         changed = True
     if "stages" not in settings:
         settings = ensure_stage_config(settings)
+        changed = True
+    # Multi-turn conversation fields (Chairman handles follow-ups)
+    if "speaker_context_level" not in settings:
+        settings["speaker_context_level"] = DEFAULT_SPEAKER_CONTEXT_LEVEL
+        changed = True
+    # Remove legacy council_speaker_id if present (now always chairman)
+    if "council_speaker_id" in settings:
+        del settings["council_speaker_id"]
         changed = True
     return settings, changed
 

@@ -689,3 +689,225 @@ async def run_full_council(
         }, {}, stages_output
 
     return stage1_results, stage2_results, stage3_result, metadata, stages_output
+
+
+def estimate_token_count(text: str) -> int:
+    """
+    Estimate token count for a given text.
+    Uses a simple heuristic of ~4 characters per token.
+    
+    Args:
+        text: The text to estimate tokens for
+    
+    Returns:
+        Estimated token count
+    """
+    if not text:
+        return 0
+    return len(text) // 4
+
+
+def _build_speaker_context(
+    conversation_messages: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    context_level: str = "full",
+) -> str:
+    """
+    Build context for the speaker based on context level.
+    
+    Args:
+        conversation_messages: All messages in the conversation
+        settings: Council settings snapshot
+        context_level: One of 'minimal', 'standard', 'full'
+    
+    Returns:
+        Context string for the speaker
+    """
+    context_parts = []
+    
+    # Find the first council response for stage data
+    council_response = None
+    for msg in conversation_messages:
+        if msg.get("role") == "assistant" and msg.get("message_type") == "council":
+            council_response = msg
+            break
+    
+    if not council_response:
+        return ""
+    
+    if context_level == "minimal":
+        # Just the final synthesis
+        stage3 = council_response.get("stage3") or {}
+        if stage3.get("response"):
+            context_parts.append(f"Council's Initial Analysis:\n{stage3.get('response')}")
+    
+    elif context_level == "standard":
+        # Final synthesis + all user queries
+        stage3 = council_response.get("stage3") or {}
+        if stage3.get("response"):
+            context_parts.append(f"Council's Initial Analysis:\n{stage3.get('response')}")
+        
+        # Add all user messages
+        user_queries = []
+        for msg in conversation_messages:
+            if msg.get("role") == "user":
+                user_queries.append(msg.get("content", ""))
+        if user_queries:
+            context_parts.append("User Queries:\n" + "\n---\n".join(user_queries))
+    
+    elif context_level == "full":
+        # All stages + rankings + full conversation
+        stages = council_response.get("stages") or []
+        
+        for stage in stages:
+            stage_name = stage.get("name", "Stage")
+            stage_prompt = stage.get("prompt", "")
+            results = stage.get("results")
+            
+            stage_text = f"=== {stage_name} ==="
+            if stage_prompt:
+                stage_text += f"\nPrompt: {stage_prompt[:500]}..." if len(stage_prompt) > 500 else f"\nPrompt: {stage_prompt}"
+            
+            if isinstance(results, list):
+                for result in results:
+                    if isinstance(result, dict):
+                        model = result.get("model", "Unknown")
+                        response = result.get("response") or result.get("ranking", "")
+                        stage_text += f"\n\n[{model}]:\n{response}"
+            elif isinstance(results, dict):
+                model = results.get("model", "Unknown")
+                response = results.get("response", "")
+                stage_text += f"\n\n[{model}]:\n{response}"
+            
+            context_parts.append(stage_text)
+        
+        # Add full conversation history
+        conv_history = []
+        for msg in conversation_messages:
+            role = msg.get("role")
+            if role == "user":
+                conv_history.append(f"User: {msg.get('content', '')}")
+            elif role == "assistant":
+                if msg.get("message_type") == "speaker":
+                    conv_history.append(f"Speaker: {msg.get('response', '')}")
+                else:
+                    # For council response, just reference it
+                    conv_history.append("Assistant: [Council Analysis - see above]")
+        
+        if conv_history:
+            context_parts.append("=== Conversation History ===\n" + "\n\n".join(conv_history))
+    
+    return "\n\n".join(context_parts)
+
+
+async def query_council_speaker(
+    user_query: str,
+    conversation_messages: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    api_key: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Query the council speaker for a follow-up response.
+    
+    Args:
+        user_query: The new user question
+        conversation_messages: All previous messages in the conversation
+        settings: Council settings (from snapshot)
+        api_key: Optional API key
+    
+    Returns:
+        Dict with 'model', 'response', and 'token_count' keys
+    """
+    members = settings.get("members", [])
+    # Chairman always handles follow-ups (simplified from separate speaker setting)
+    chairman_id = settings.get("chairman_id")
+    context_level = settings.get("speaker_context_level", "full")
+    
+    # Find the chairman member
+    chairman_member = None
+    for member in members:
+        if member.get("id") == chairman_id:
+            chairman_member = member
+            break
+    
+    # Fallback to first member if chairman not found
+    if not chairman_member and members:
+        chairman_member = members[0]
+    
+    if not chairman_member:
+        return {
+            "model": "Error",
+            "response": "No council chairman configured.",
+            "token_count": 0,
+        }
+    
+    chairman_model_id = chairman_member.get("model_id", "")
+    chairman_label = chairman_member.get("alias", "Chairman")
+    chairman_system_prompt = chairman_member.get("system_prompt", "")
+    
+    # Build context based on level
+    context = _build_speaker_context(conversation_messages, settings, context_level)
+    
+    # Create the prompt for the chairman (follow-up role)
+    chairman_prompt = f"""You are the Council Chairman, continuing a conversation after the initial council analysis.
+
+{context}
+
+---
+
+The user has a follow-up question. Please respond based on the council's analysis and the conversation so far.
+
+User's Follow-up Question: {user_query}
+
+Provide a helpful, accurate response:"""
+    
+    messages = [{"role": "user", "content": chairman_prompt}]
+    
+    try:
+        response = await query_model(
+            chairman_model_id,
+            messages,
+            system_prompt=chairman_system_prompt if chairman_system_prompt else None,
+            api_key=api_key,
+        )
+        
+        if response is None or not response.get("content"):
+            return {
+                "model": chairman_label,
+                "response": "Error: Unable to generate response. Please try again.",
+                "token_count": 0,
+            }
+        
+        response_text = response.get("content", "")
+        token_count = estimate_token_count(chairman_prompt + response_text)
+        
+        return {
+            "model": chairman_label,
+            "response": response_text,
+            "token_count": token_count,
+        }
+    
+    except Exception as e:
+        error_msg = str(e)
+        # Check for specific API errors
+        if "expired" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            return {
+                "model": chairman_label,
+                "response": f"API Error: Token expired or unauthorized. Please refresh your API credentials.",
+                "token_count": 0,
+                "error": True,
+            }
+        elif "region" in error_msg.lower():
+            return {
+                "model": chairman_label,
+                "response": f"API Error: Wrong region configured. Please check your Bedrock region settings.",
+                "token_count": 0,
+                "error": True,
+            }
+        else:
+            return {
+                "model": chairman_label,
+                "response": f"Error: {error_msg}",
+                "token_count": 0,
+                "error": True,
+            }

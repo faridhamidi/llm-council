@@ -329,3 +329,14 @@ BEDROCK_REGION_OPTIONS = [
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
+
+# Multi-turn conversation settings
+MAX_FOLLOW_UP_MESSAGES = 20  # Maximum follow-up messages per conversation (easily adjustable)
+
+# Speaker context levels - determines how much context the speaker receives for follow-ups
+SPEAKER_CONTEXT_LEVELS = {
+    "minimal": "Final synthesis only",
+    "standard": "Synthesis + all user queries",
+    "full": "All stages + rankings + full conversation",
+}
+DEFAULT_SPEAKER_CONTEXT_LEVEL = "full"

@@ -49,6 +49,8 @@ export default function ChatInterface({
   onSendMessage,
   onStop,
   isLoading,
+  onRetry,
+  remainingMessages,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -113,6 +115,35 @@ export default function ChatInterface({
     });
   };
 
+  const renderSpeakerMessage = (msg) => {
+    const speakerResponse = msg.speaker_response || msg.response;
+    const speakerModel = msg.speaker_model || msg.model || 'Council Speaker';
+    const hasError = msg.error;
+
+    return (
+      <div className="speaker-message">
+        <div className="message-header">
+          <div className="message-label speaker-label">
+            💬 {speakerModel}
+          </div>
+          <CopyButton text={speakerResponse} className="copy-message-btn" />
+          {hasError && onRetry && (
+            <button className="retry-btn" onClick={() => onRetry && onRetry()}>
+              Retry
+            </button>
+          )}
+        </div>
+        <div className="message-content">
+          <div className="markdown-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {speakerResponse}
+            </ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -136,6 +167,16 @@ export default function ChatInterface({
       handleSubmit(e);
     }
   };
+
+  // Calculate message counter display
+  const hasMessages = conversation?.messages?.length > 0;
+  const messageCounter = remainingMessages !== undefined && hasMessages ? (
+    <div className={`message-counter ${remainingMessages <= 5 ? 'warning' : ''} ${remainingMessages === 0 ? 'limit-reached' : ''}`}>
+      {remainingMessages === 0
+        ? "Message limit reached. Start a new conversation."
+        : `${remainingMessages} follow-up${remainingMessages !== 1 ? 's' : ''} remaining`}
+    </div>
+  ) : null;
 
   if (!conversation) {
     return (
@@ -173,9 +214,11 @@ export default function ChatInterface({
                     </div>
                   </div>
                 </div>
+              ) : msg.message_type === 'speaker' ? (
+                renderSpeakerMessage(msg)
               ) : (
                 <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
+                  <div className="message-label">🏛️ LLM Council</div>
                   {(() => {
                     const labelToModel = buildLabelMap(msg);
                     const dynamicStages = renderDynamicStages(msg);
@@ -184,43 +227,43 @@ export default function ChatInterface({
                         {dynamicStages}
                         {!dynamicStages && (
                           <>
-                        {/* Stage 1 */}
-                        {msg.loading?.stage1 && (
-                          <div className="stage-loading">
-                            <div className="spinner"></div>
-                            <span>Running: Collecting individual responses...</span>
-                          </div>
-                        )}
-                        {msg.stage1 && <Stage1 responses={msg.stage1} />}
+                            {/* Stage 1 */}
+                            {msg.loading?.stage1 && (
+                              <div className="stage-loading">
+                                <div className="spinner"></div>
+                                <span>Running: Collecting individual responses...</span>
+                              </div>
+                            )}
+                            {msg.stage1 && <Stage1 responses={msg.stage1} />}
 
-                        {/* Stage 2 */}
-                        {msg.loading?.stage2 && (
-                          <div className="stage-loading">
-                            <div className="spinner"></div>
-                            <span>Running: Peer rankings...</span>
-                          </div>
-                        )}
-                        {msg.stage2 && (
-                          <Stage2
-                            rankings={msg.stage2}
-                            labelToModel={labelToModel}
-                            aggregateRankings={msg.metadata?.aggregate_rankings}
-                          />
-                        )}
+                            {/* Stage 2 */}
+                            {msg.loading?.stage2 && (
+                              <div className="stage-loading">
+                                <div className="spinner"></div>
+                                <span>Running: Peer rankings...</span>
+                              </div>
+                            )}
+                            {msg.stage2 && (
+                              <Stage2
+                                rankings={msg.stage2}
+                                labelToModel={labelToModel}
+                                aggregateRankings={msg.metadata?.aggregate_rankings}
+                              />
+                            )}
 
-                        {/* Stage 3 */}
-                        {msg.loading?.stage3 && (
-                          <div className="stage-loading">
-                            <div className="spinner"></div>
-                            <span>Running: Final synthesis...</span>
-                          </div>
-                        )}
-                        {msg.stage3 && (
-                          <Stage3
-                            finalResponse={msg.stage3}
-                            labelToModel={labelToModel}
-                          />
-                        )}
+                            {/* Stage 3 */}
+                            {msg.loading?.stage3 && (
+                              <div className="stage-loading">
+                                <div className="spinner"></div>
+                                <span>Running: Final synthesis...</span>
+                              </div>
+                            )}
+                            {msg.stage3 && (
+                              <Stage3
+                                finalResponse={msg.stage3}
+                                labelToModel={labelToModel}
+                              />
+                            )}
                           </>
                         )}
                       </>
@@ -246,6 +289,28 @@ export default function ChatInterface({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {hasMessages && remainingMessages !== 0 && (
+        <form className="input-form follow-up" onSubmit={handleSubmit}>
+          {messageCounter}
+          <textarea
+            className="message-input"
+            placeholder="Ask a follow-up question..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading || remainingMessages === 0}
+            rows={2}
+          />
+          <button
+            type="submit"
+            className="send-button"
+            disabled={!input.trim() || isLoading || remainingMessages === 0}
+          >
+            Send
+          </button>
+        </form>
+      )}
 
       {conversation.messages.length === 0 && (
         <form className="input-form" onSubmit={handleSubmit}>
