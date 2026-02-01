@@ -307,6 +307,9 @@ export default function Sidebar({
           if (stage.member_ids.length >= 5) {
             return stage;
           }
+          if (stage.member_ids.includes(draggedMember.memberId)) {
+            return stage;
+          }
           return {
             ...stage,
             member_ids: [...stage.member_ids, draggedMember.memberId],
