@@ -4,26 +4,58 @@
 
 The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses Amazon Bedrock Runtime to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
 
-In a bit more detail, here is what happens when you submit a query:
+## Credits
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+This project is a fork/evolution of **[Andrej Karpathy's LLM Council](https://github.com/karpathy/llm-council)** idea (originally "99% vibe coded" as a fun hack). The original repository served as the inspiration and foundation.
 
-## Features (Current)
+## Codebase Evolution
 
-- **3-stage council flow**: parallel responses → anonymous peer ranking → chairman synthesis
-- **Streaming updates**: server-sent events (SSE) for stage-by-stage progress
-- **Cancelable requests**: stop in-flight streams from the UI
-- **Council Settings UI**: manage members, aliases, chairman, title model, and per-member system prompts
-- **Presets**: save/apply/delete council configurations
-- **Bedrock region switcher**: change region and list region-compatible Converse models
-- **Conversation storage**: JSON on disk with soft-delete + restore (trash)
-- **Readable UX**: tabbed Stage 1/2/3 views, parsed rankings, and aggregate ranking table
+While the core concept remains, the codebase has evolved significantly to support enterprise-grade features and flexibility. Here is a timeline of the major architectural shifts:
 
-## Vibe Code Alert
+### Phase 1: Bedrock & Session Management
+* **Commits**: `f6cbbfb` (Token Config), `9374792` (Region Support), `95da13d` (Streaming)
+* **Change**: Replaced the original direct API calls with **AWS Bedrock Runtime**. Added region awareness (to support cross-region inference profiles) and improved SSE streaming stability.
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+### Phase 2: Configuration UI
+* **Commits**: `3c850a5` (Settings UI), `19e0a18` (System Prompts)
+* **Change**: Moved hardcoded configurations (members, specialized system prompts, aliases) into a runtime UI. This allowed users to tweak their council without restarting the backend.
+
+### Phase 3: Robust Persistence (SQLite)
+* **Commit**: `410d78e`
+* **Change**: Migrated from flat JSON files to **SQLite** (`data/council.db`).
+* **Why**: The original file-based system struggled with concurrent writes and complex queries. The SQLite migration (with auto-import of legacy JSON) enabled reliable session storage, search, and settings persistence.
+
+### Phase 4: Security
+* **Commit**: `665a5ed`
+* **Change**: Introduced **PIN Authentication** (PBKDF2 hashed) to protect the interface when running in shared environments.
+
+### Phase 5: Dynamic Council Flow
+* **Commit**: `76a173e`
+* **Change**: Replaced the fixed "3-Stage" waterfall model with a **Dynamic Stage Builder**.
+* **Impact**: The backend can now execute arbitrary pipelines (e.g., N parallel stages, sequential debates, critique loops). This required a major refactor of `council.py` to handle generic stage definitions rather than hardcoded functions.
+
+### Phase 6: Speaker Mode
+* **Commit**: `29d9429`
+* **Change**: Added multi-turn capabilities. Users can now "chat" with the council findings (Speaker Mode) rather than just receiving a static report.
+
+## Core Flow (Default)
+
+The default preset still follows the classic 3-stage council flow, but you can now customize it:
+
+1. **Stage 1: First opinions**. The user query is given to all LLMs individually.
+2. **Stage 2: Review**. Each individual LLM reviews anonymized responses from peers and ranks them.
+3. **Stage 3: Final response**. The designated Chairman synthesizes the final answer based on the peer reviews.
+
+## Features
+
+- **Dynamic Stage Builder**: Configure your own deliberation pipeline (infinite stages, parallel/sequential).
+- **Multi-turn Conversation**: Chat with the results using "Speaker" mode.
+- **Streaming updates**: Server-sent events (SSE) for real-time progress.
+- **Secure Storage**: Local SQLite database for conversations, settings, and presets.
+- **Access Control**: Optional PIN protection for the web interface.
+- **Council Settings UI**: Manage members, aliases, customized system prompts, and stage configurations.
+- **Bedrock Integration**: Native support for AWS Bedrock Converse API (cross-region inference profiles supported).
+- **Session Management**: Soft-delete, trash/restore, and search history.
 
 ## Setup
 
@@ -53,53 +85,11 @@ AWS_REGION=ap-southeast-1
 ```
 
 You can also use `AWS_BEARER_TOKEN_BEDROCK` instead of `BEDROCK_API_KEY` if you prefer the AWS env var name.
-Note: Bedrock inference profiles are source-region scoped. If a model's inference profile doesn't list your `AWS_REGION` as a supported source region, you'll need to change `AWS_REGION` to one of the supported source regions for that profile.
+Note: Ensure your `AWS_REGION` supports the Bedrock Inference Profiles you intend to use.
 
-### 3. Configure Models (Optional)
+### 3. Run the Application
 
-You can customize defaults in `backend/config.py`, but most users should do it from the UI (see below):
-
-```python
-COUNCIL_MODELS = [
-    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "us.anthropic.claude-opus-4-5-20251101-v1:0",
-    "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-]
-
-COUNCIL_ALIASES = [
-    "Councilor A",
-    "Councilor B",
-    "Councilor C",
-    "Councilor D",
-]
-
-CHAIRMAN_MODEL = "us.anthropic.claude-opus-4-5-20251101-v1:0"
-CHAIRMAN_ALIAS = "Chairman"
-TITLE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-```
-
-### Council Settings (UI)
-
-You can now manage council members, aliases, chairman, and title model from the UI:
-
-1. Click **Council Settings** in the sidebar.
-2. Add/remove members (max 7) and drag to reorder.
-3. Pick models from the Converse‑compatible list for the current region.
-4. Set chairman + title model.
-5. Optional: add per‑member system prompts.
-6. Optional: disable system prompts in Stage 2 & 3.
-7. Save/apply/delete presets.
-8. Click **Save Settings** to apply instantly (no restart).
-
-Notes:
-- Region and API key updates are in‑memory and reset on backend restart.
-- If a model is not available in the selected region, it will be rejected.
-- Settings are persisted in `data/council_settings.json`. Presets are stored in `data/council_presets.json`.
-
-## Running the Application
-
-**Option 1: Use the start script**
+**Option 1: Use the start script (Recommended)**
 ```bash
 ./start.sh
 ```
@@ -117,19 +107,22 @@ cd frontend
 npm run dev
 ```
 
-Then open http://localhost:5173 in your browser.
+Then open http://localhost:5173.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, Bedrock Runtime API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+- **Backend:** FastAPI (Python 3.10+), async httpx, Bedrock Runtime API, SQLite
+- **Frontend:** React + Vite, react-markdown, TailwindCSS
+- **Storage:** SQLite (`data/council.db`)
+- **Package Management:** uv (Python), npm (JS)
 
 ## API Highlights
 
-- `POST /api/conversations/{id}/message`: Non‑streaming 3‑stage response
-- `POST /api/conversations/{id}/message/stream`: SSE streaming (stage1/2/3 events)
-- `POST /api/conversations/{id}/message/cancel`: Cancel active stream
-- `POST /api/settings/council`: Update council settings
-- `GET /api/settings/bedrock-models`: Models available for current region
+- `POST /api/conversations/{id}/message/stream`: SSE streaming for dynamic stages.
+- `POST /api/settings/council`: Configure members and the stage pipeline.
+- `GET /api/settings/bedrock-models`: Fetch available Bedrock models.
+- `POST /api/auth/verify`: PIN verification endpoint.
+
+## Vibe Code Alert (Original)
+
+> This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like. - *Andrej Karpathy*
