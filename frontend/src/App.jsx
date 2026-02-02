@@ -132,10 +132,27 @@ function App() {
     const last = messages[messages.length - 1];
     const nextLast = updater({
       ...last,
-      loading: last?.loading ? { ...last.loading } : undefined,
     });
     messages[messages.length - 1] = nextLast;
     return { ...conversation, messages };
+  };
+
+  const upsertStage = (stages = [], stageData = {}) => {
+    const nextStages = [...stages];
+    const index = stageData.index;
+    if (index !== undefined && index !== null) {
+      nextStages[index] = { ...(nextStages[index] || {}), ...stageData };
+      return nextStages;
+    }
+    const idIndex = stageData.id
+      ? nextStages.findIndex((stage) => stage.id === stageData.id)
+      : -1;
+    if (idIndex >= 0) {
+      nextStages[idIndex] = { ...nextStages[idIndex], ...stageData };
+      return nextStages;
+    }
+    nextStages.push(stageData);
+    return nextStages;
   };
 
   const clearDeleteTimers = () => {
@@ -280,15 +297,8 @@ function App() {
       const userMessage = { role: 'user', content };
       const assistantMessage = {
         role: 'assistant',
-        stage1: null,
-        stage2: null,
-        stage3: null,
-        metadata: null,
-        loading: {
-          stage1: false,
-          stage2: false,
-          stage3: false,
-        },
+        message_type: 'council',
+        stages: [],
       };
       updateConversationById(targetConversationId, (prev) => ({
         ...prev,
@@ -301,74 +311,44 @@ function App() {
         content,
         (eventType, event) => {
           switch (eventType) {
-            case 'stage1_start':
+            case 'stage_start':
               updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage1 = true;
-                  }
-                  return lastMsg;
-                })
+                updateLastAssistantMessage(prev, (lastMsg) => ({
+                  ...lastMsg,
+                  stages: upsertStage(lastMsg.stages, {
+                    ...event.data,
+                    status: 'running',
+                  }),
+                }))
               );
               break;
 
-            case 'stage1_complete':
+            case 'stage_complete':
               updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  lastMsg.stage1 = event.data;
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage1 = false;
-                  }
-                  return lastMsg;
-                })
+                updateLastAssistantMessage(prev, (lastMsg) => ({
+                  ...lastMsg,
+                  stages: upsertStage(lastMsg.stages, {
+                    ...event.data,
+                    status: 'complete',
+                  }),
+                }))
               );
               break;
-
-            case 'stage2_start':
+            case 'speaker_complete':
               updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage2 = true;
-                  }
-                  return lastMsg;
-                })
+                updateLastAssistantMessage(prev, (lastMsg) => ({
+                  ...lastMsg,
+                  message_type: 'speaker',
+                  model: event?.data?.model || 'Chairman',
+                  response: event?.data?.response || '',
+                  speaker_response: event?.data?.response || '',
+                  error: event?.data?.error || false,
+                  stages: [],
+                }))
               );
-              break;
-
-            case 'stage2_complete':
-              updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  lastMsg.stage2 = event.data;
-                  lastMsg.metadata = event.metadata;
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage2 = false;
-                  }
-                  return lastMsg;
-                })
-              );
-              break;
-
-            case 'stage3_start':
-              updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage3 = true;
-                  }
-                  return lastMsg;
-                })
-              );
-              break;
-
-            case 'stage3_complete':
-              updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  lastMsg.stage3 = event.data;
-                  if (lastMsg.loading) {
-                    lastMsg.loading.stage3 = false;
-                  }
-                  return lastMsg;
-                })
-              );
+              if (event.remaining_messages !== undefined) {
+                setRemainingMessages(event.remaining_messages);
+              }
               break;
 
             case 'title_complete':
@@ -390,14 +370,12 @@ function App() {
               break;
             case 'cancelled':
               updateConversationById(targetConversationId, (prev) =>
-                updateLastAssistantMessage(prev, (lastMsg) => {
-                  if (lastMsg?.loading) {
-                    lastMsg.loading.stage1 = false;
-                    lastMsg.loading.stage2 = false;
-                    lastMsg.loading.stage3 = false;
-                  }
-                  return lastMsg;
-                })
+                updateLastAssistantMessage(prev, (lastMsg) => ({
+                  ...lastMsg,
+                  stages: (lastMsg.stages || []).map((stage) =>
+                    stage.status === 'running' ? { ...stage, status: 'cancelled' } : stage
+                  ),
+                }))
               );
               setStreamController(null);
               setStreamingConversationId(null);
@@ -412,14 +390,12 @@ function App() {
     } catch (error) {
       if (error.name === 'AbortError') {
         updateConversationById(targetConversationId, (prev) =>
-          updateLastAssistantMessage(prev, (lastMsg) => {
-            if (lastMsg?.loading) {
-              lastMsg.loading.stage1 = false;
-              lastMsg.loading.stage2 = false;
-              lastMsg.loading.stage3 = false;
-            }
-            return lastMsg;
-          })
+          updateLastAssistantMessage(prev, (lastMsg) => ({
+            ...lastMsg,
+            stages: (lastMsg.stages || []).map((stage) =>
+              stage.status === 'running' ? { ...stage, status: 'cancelled' } : stage
+            ),
+          }))
         );
       } else {
         console.error('Failed to send message:', error);
@@ -484,34 +460,19 @@ function App() {
       updateConversationById(currentConversationId, (prev) =>
         updateLastAssistantMessage(prev, (lastMsg) => ({
           ...lastMsg,
-          loading: { stage1: true, stage2: true, stage3: true } // Generic loading indicator
+          stages: (lastMsg.stages || []).map((stage) => ({ ...stage, status: 'running' })),
         }))
       );
 
       const response = await api.resumeCouncil(currentConversationId, humanInput);
 
       // Update the conversation with the new results
-      // response contains the full message object or similar structure?
-      // The backend returns:
-      // {
-      //     "message_type": "council",
-      //     "stage1": stage1_results,
-      //     "stage2": stage2_results,
-      //     "stage3": stage3_result,
-      //     "stages": stages,
-      //     "metadata": metadata,
-      //     "usage": usage
-      // }
+      // response contains the full message object (stages + metadata).
 
       updateConversationById(currentConversationId, (prev) =>
         updateLastAssistantMessage(prev, (lastMsg) => ({
           ...lastMsg,
-          stage1: response.stage1,
-          stage2: response.stage2,
-          stage3: response.stage3,
-          stages: response.stages,
-          metadata: response.metadata,
-          loading: { stage1: false, stage2: false, stage3: false }
+          stages: response.stages || [],
         }))
       );
 
@@ -521,7 +482,9 @@ function App() {
       updateConversationById(currentConversationId, (prev) =>
         updateLastAssistantMessage(prev, (lastMsg) => ({
           ...lastMsg,
-          loading: { stage1: false, stage2: false, stage3: false }
+          stages: (lastMsg.stages || []).map((stage) =>
+            stage.status === 'running' ? { ...stage, status: 'cancelled' } : stage
+          ),
         }))
       );
     }

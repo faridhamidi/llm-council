@@ -705,7 +705,7 @@ export default function Sidebar({
                           }))
                         }
                       />
-                      Disable system prompts in Stage 2 & 3
+                      Disable system prompts in Rankings & Synthesis
                     </label>
                   </div>
                   <div className="control-row">

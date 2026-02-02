@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import './Stage3.css';
+import './StageSynthesis.css';
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
@@ -12,7 +12,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage3({
+export default function StageSynthesis({
   finalResponse,
   labelToModel,
   stageName = 'Final Council Answer',
@@ -49,13 +49,13 @@ export default function Stage3({
   };
 
   return (
-    <div className="stage stage3">
+    <div className="stage stage-synthesis">
       <h3 className="stage-title">{stageName}</h3>
       {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
       <div className="final-response">
-        <div className="stage3-header">
+        <div className="stage-synthesis-header">
           <div className="chairman-label">Chairman: {finalResponse.model}</div>
-          <button className="copy-stage3-btn" onClick={handleCopy}>
+          <button className="copy-stage-synthesis-btn" onClick={handleCopy}>
             {copied ? 'Copied' : 'Copy'}
           </button>
         </div>

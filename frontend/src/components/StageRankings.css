@@ -1,8 +1,8 @@
-.stage2 {
+.stage-rankings {
   background: var(--bg-tertiary);
 }
 
-.stage2 h4 {
+.stage-rankings h4 {
   margin: 20px 0 8px 0;
   color: var(--text-primary);
   font-size: 13px;
@@ -10,7 +10,7 @@
   letter-spacing: 0.4px;
 }
 
-.stage2 h4:first-of-type {
+.stage-rankings h4:first-of-type {
   margin-top: 0;
 }
 
@@ -21,7 +21,7 @@
   line-height: 1.6;
 }
 
-.stage2 .stage-prompt-text {
+.stage-rankings .stage-prompt-text {
   margin: -8px 0 14px 0;
   padding: 10px 12px;
   border-radius: 10px;
@@ -89,14 +89,14 @@
   font-size: 11px;
 }
 
-.stage2 .tabs {
+.stage-rankings .tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
-.stage2 .tab {
+.stage-rankings .tab {
   padding: 8px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
@@ -107,20 +107,20 @@
   transition: all 0.2s ease;
 }
 
-.stage2 .tab:hover {
+.stage-rankings .tab:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--accent-green);
 }
 
-.stage2 .tab.active {
+.stage-rankings .tab.active {
   background: rgba(62, 207, 142, 0.18);
   color: var(--accent-green-light);
   border-color: rgba(62, 207, 142, 0.6);
   font-weight: 600;
 }
 
-.stage2 .tab-content {
+.stage-rankings .tab-content {
   background: var(--bg-secondary);
   padding: 16px;
   border-radius: 12px;
@@ -192,7 +192,7 @@
 }
 
 @media (max-width: 780px) {
-  .stage2 h4 {
+  .stage-rankings h4 {
     font-size: 12px;
   }
 
@@ -200,12 +200,12 @@
     font-size: 11px;
   }
 
-  .stage2 .tab {
+  .stage-rankings .tab {
     padding: 6px 10px;
     font-size: 12px;
   }
 
-  .stage2 .tab-content {
+  .stage-rankings .tab-content {
     padding: 12px;
   }
 

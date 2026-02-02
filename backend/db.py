@@ -118,16 +118,42 @@ def _migrate_conversations(conn: sqlite3.Connection) -> None:
                     (conv_id, message.get("content", ""), msg_time),
                 )
             elif role == "assistant":
+                stages = []
+                if message.get("stage1") is not None:
+                    stages.append({
+                        "id": "stage-1",
+                        "name": "Individual Responses",
+                        "prompt": "",
+                        "execution_mode": "parallel",
+                        "kind": "responses",
+                        "results": message.get("stage1"),
+                    })
+                if message.get("stage2") is not None:
+                    stages.append({
+                        "id": "stage-2",
+                        "name": "Peer Rankings",
+                        "prompt": "",
+                        "execution_mode": "parallel",
+                        "kind": "rankings",
+                        "results": message.get("stage2"),
+                    })
+                if message.get("stage3") is not None:
+                    stages.append({
+                        "id": "stage-3",
+                        "name": "Final Synthesis",
+                        "prompt": "",
+                        "execution_mode": "sequential",
+                        "kind": "synthesis",
+                        "results": message.get("stage3"),
+                    })
                 conn.execute(
                     """
-                    INSERT INTO messages (conversation_id, role, stage1_json, stage2_json, stage3_json, created_at)
-                    VALUES (?, 'assistant', ?, ?, ?, ?)
+                    INSERT INTO messages (conversation_id, role, stages_json, created_at)
+                    VALUES (?, 'assistant', ?, ?)
                     """,
                     (
                         conv_id,
-                        json.dumps(message.get("stage1")),
-                        json.dumps(message.get("stage2")),
-                        json.dumps(message.get("stage3")),
+                        json.dumps(stages) if stages else None,
                         msg_time,
                     ),
                 )
@@ -168,16 +194,42 @@ def _migrate_conversations(conn: sqlite3.Connection) -> None:
                     (conv_id, message.get("content", ""), msg_time),
                 )
             elif role == "assistant":
+                stages = []
+                if message.get("stage1") is not None:
+                    stages.append({
+                        "id": "stage-1",
+                        "name": "Individual Responses",
+                        "prompt": "",
+                        "execution_mode": "parallel",
+                        "kind": "responses",
+                        "results": message.get("stage1"),
+                    })
+                if message.get("stage2") is not None:
+                    stages.append({
+                        "id": "stage-2",
+                        "name": "Peer Rankings",
+                        "prompt": "",
+                        "execution_mode": "parallel",
+                        "kind": "rankings",
+                        "results": message.get("stage2"),
+                    })
+                if message.get("stage3") is not None:
+                    stages.append({
+                        "id": "stage-3",
+                        "name": "Final Synthesis",
+                        "prompt": "",
+                        "execution_mode": "sequential",
+                        "kind": "synthesis",
+                        "results": message.get("stage3"),
+                    })
                 conn.execute(
                     """
-                    INSERT INTO messages (conversation_id, role, stage1_json, stage2_json, stage3_json, created_at)
-                    VALUES (?, 'assistant', ?, ?, ?, ?)
+                    INSERT INTO messages (conversation_id, role, stages_json, created_at)
+                    VALUES (?, 'assistant', ?, ?)
                     """,
                     (
                         conv_id,
-                        json.dumps(message.get("stage1")),
-                        json.dumps(message.get("stage2")),
-                        json.dumps(message.get("stage3")),
+                        json.dumps(stages) if stages else None,
                         msg_time,
                     ),
                 )
@@ -251,6 +303,60 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
     _meta_set(conn, "json_migrated", _now_iso())
 
 
+def _backfill_stages_json(conn: sqlite3.Connection) -> None:
+    if _meta_get(conn, "stages_backfilled"):
+        return
+    rows = conn.execute(
+        """
+        SELECT id, stage1_json, stage2_json, stage3_json, stages_json
+        FROM messages
+        WHERE stages_json IS NULL
+          AND (stage1_json IS NOT NULL OR stage2_json IS NOT NULL OR stage3_json IS NOT NULL)
+        """
+    ).fetchall()
+    for row in rows:
+        stages = []
+        try:
+            stage1 = json.loads(row["stage1_json"]) if row["stage1_json"] else None
+            stage2 = json.loads(row["stage2_json"]) if row["stage2_json"] else None
+            stage3 = json.loads(row["stage3_json"]) if row["stage3_json"] else None
+        except Exception:
+            continue
+        if stage1 is not None:
+            stages.append({
+                "id": "stage-1",
+                "name": "Individual Responses",
+                "prompt": "",
+                "execution_mode": "parallel",
+                "kind": "responses",
+                "results": stage1,
+            })
+        if stage2 is not None:
+            stages.append({
+                "id": "stage-2",
+                "name": "Peer Rankings",
+                "prompt": "",
+                "execution_mode": "parallel",
+                "kind": "rankings",
+                "results": stage2,
+            })
+        if stage3 is not None:
+            stages.append({
+                "id": "stage-3",
+                "name": "Final Synthesis",
+                "prompt": "",
+                "execution_mode": "sequential",
+                "kind": "synthesis",
+                "results": stage3,
+            })
+        if stages:
+            conn.execute(
+                "UPDATE messages SET stages_json = ? WHERE id = ?",
+                (json.dumps(stages), row["id"]),
+            )
+    _meta_set(conn, "stages_backfilled", _now_iso())
+
+
 def init_db() -> None:
     global _DB_INITIALIZED
     if _DB_INITIALIZED:
@@ -312,6 +418,7 @@ def init_db() -> None:
         _migrate_from_json(conn)
         _ensure_stages_column(conn)
         _ensure_multiturn_columns(conn)
+        _backfill_stages_json(conn)
         conn.commit()
     finally:
         conn.close()

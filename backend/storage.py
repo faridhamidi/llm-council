@@ -95,16 +95,43 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
                 })
             else:
                 # Council response (full stages)
-                stage1 = json.loads(msg["stage1_json"]) if msg["stage1_json"] else None
-                stage2 = json.loads(msg["stage2_json"]) if msg["stage2_json"] else None
-                stage3 = json.loads(msg["stage3_json"]) if msg["stage3_json"] else None
                 stages = json.loads(msg["stages_json"]) if msg["stages_json"] else None
+                if not stages:
+                    # Legacy fallback: build stages from stage1/2/3 columns
+                    stage1 = json.loads(msg["stage1_json"]) if msg["stage1_json"] else None
+                    stage2 = json.loads(msg["stage2_json"]) if msg["stage2_json"] else None
+                    stage3 = json.loads(msg["stage3_json"]) if msg["stage3_json"] else None
+                    stages = []
+                    if stage1 is not None:
+                        stages.append({
+                            "id": "stage-1",
+                            "name": "Individual Responses",
+                            "prompt": "",
+                            "execution_mode": "parallel",
+                            "kind": "responses",
+                            "results": stage1,
+                        })
+                    if stage2 is not None:
+                        stages.append({
+                            "id": "stage-2",
+                            "name": "Peer Rankings",
+                            "prompt": "",
+                            "execution_mode": "parallel",
+                            "kind": "rankings",
+                            "results": stage2,
+                        })
+                    if stage3 is not None:
+                        stages.append({
+                            "id": "stage-3",
+                            "name": "Final Synthesis",
+                            "prompt": "",
+                            "execution_mode": "sequential",
+                            "kind": "synthesis",
+                            "results": stage3,
+                        })
                 messages.append({
                     "role": "assistant",
                     "message_type": "council",
-                    "stage1": stage1,
-                    "stage2": stage2,
-                    "stage3": stage3,
                     "stages": stages,
                     "token_count": token_count,
                 })
@@ -172,34 +199,25 @@ def add_user_message(conversation_id: str, content: str, token_count: int = 0) -
 
 def add_assistant_message(
     conversation_id: str,
-    stage1: List[Dict[str, Any]],
-    stage2: List[Dict[str, Any]],
-    stage3: Dict[str, Any],
-    stages: List[Dict[str, Any]] | None = None,
+    stages: List[Dict[str, Any]],
     token_count: int = 0,
 ) -> None:
     """
-    Add an assistant message with all 3 stages to a conversation (council response).
+    Add an assistant message with the full stage outputs to a conversation.
 
     Args:
         conversation_id: Conversation identifier
-        stage1: List of individual model responses
-        stage2: List of model rankings
-        stage3: Final synthesized response
         stages: Full stage outputs
         token_count: Estimated token count for this message
     """
     with with_connection() as conn:
         conn.execute(
             """
-            INSERT INTO messages (conversation_id, role, message_type, stage1_json, stage2_json, stage3_json, stages_json, token_count, created_at)
-            VALUES (?, 'assistant', 'council', ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (conversation_id, role, message_type, stages_json, token_count, created_at)
+            VALUES (?, 'assistant', 'council', ?, ?, ?)
             """,
             (
                 conversation_id,
-                json.dumps(stage1),
-                json.dumps(stage2),
-                json.dumps(stage3),
                 json.dumps(stages) if stages is not None else None,
                 token_count,
                 _now_iso(),

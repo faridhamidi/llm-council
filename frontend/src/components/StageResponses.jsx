@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import './Stage1.css';
+import './StageResponses.css';
 
-export default function Stage1({ responses, stageName = 'Individual Responses', stagePrompt = '' }) {
+export default function StageResponses({ responses, stageName = 'Individual Responses', stagePrompt = '' }) {
   const [activeTab, setActiveTab] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -50,7 +50,7 @@ export default function Stage1({ responses, stageName = 'Individual Responses', 
   };
 
   return (
-    <div className="stage stage1">
+    <div className="stage stage-responses">
       <h3 className="stage-title">{stageName}</h3>
       {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
 

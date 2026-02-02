@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import './Stage2.css';
+import './StageRankings.css';
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
@@ -14,7 +14,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage2({
+export default function StageRankings({
   rankings,
   labelToModel,
   aggregateRankings,
@@ -67,7 +67,7 @@ export default function Stage2({
   };
 
   return (
-    <div className="stage stage2">
+    <div className="stage stage-rankings">
       <h3 className="stage-title">{stageName}</h3>
       {stagePrompt && <div className="stage-prompt-text">{stagePrompt}</div>}
 

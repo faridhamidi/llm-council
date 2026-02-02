@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Any, Literal
+from contextlib import asynccontextmanager
 import uuid
 import json
 import asyncio
@@ -40,15 +41,22 @@ from .council_presets import (
 from .council import (
     run_full_council,
     generate_conversation_title,
-    stage1_collect_responses,
-    stage2_collect_rankings,
-    stage3_synthesize_final,
-    calculate_aggregate_rankings,
+    get_final_response,
     query_council_speaker,
     estimate_token_count,
 )
 
-app = FastAPI(title="LLM Council API")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    try:
+        db.check_db()
+        yield
+    except Exception as exc:
+        print(f"Database health check failed: {exc}")
+        raise
+
+
+app = FastAPI(title="LLM Council API", lifespan=lifespan)
 DISABLE_APP_PIN = os.getenv("DISABLE_APP_PIN", "").lower() in {"1", "true", "yes"}
 
 # Track active streaming tasks so they can be cancelled from the UI.
@@ -324,22 +332,22 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         current_settings = get_settings()
         storage.save_settings_snapshot(conversation_id, current_settings)
 
-        # Run the 3-stage council process
-        stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
+        # Run the council pipeline
+        stages, metadata = await run_full_council(
             payload.content,
             api_key=bedrock_key,
+            settings=current_settings,
         )
 
+        final_result = get_final_response(stages)
+
         # Estimate tokens for response
-        response_tokens = estimate_token_count(str(stage3_result.get("response", "")))
+        response_tokens = estimate_token_count(str(final_result.get("response", "")))
 
         # Add assistant message with all stages
         storage.add_assistant_message(
             conversation_id,
-            stage1_results,
-            stage2_results,
-            stage3_result,
-            stages=stages,
+            stages,
             token_count=response_tokens,
         )
 
@@ -349,9 +357,6 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         # Return the complete response with metadata
         return {
             "message_type": "council",
-            "stage1": stage1_results,
-            "stage2": stage2_results,
-            "stage3": stage3_result,
             "metadata": metadata,
             "stages": stages,
             "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
@@ -453,27 +458,23 @@ async def retry_message(conversation_id: str, http_request: Request):
     
     if user_message_count == 1:
         # This was the first message - retry full council
-        stage1_results, stage2_results, stage3_result, metadata, stages = await run_full_council(
+        stages, metadata = await run_full_council(
             last_user_msg.get("content", ""),
             api_key=bedrock_key,
+            settings=settings,
         )
-        
-        response_tokens = estimate_token_count(str(stage3_result.get("response", "")))
+
+        final_result = get_final_response(stages)
+        response_tokens = estimate_token_count(str(final_result.get("response", "")))
         storage.add_assistant_message(
             conversation_id,
-            stage1_results,
-            stage2_results,
-            stage3_result,
-            stages=stages,
+            stages,
             token_count=response_tokens,
         )
         
         updated_conversation = storage.get_conversation(conversation_id)
         return {
             "message_type": "council",
-            "stage1": stage1_results,
-            "stage2": stage2_results,
-            "stage3": stage3_result,
             "metadata": metadata,
             "stages": stages,
             "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
@@ -757,7 +758,7 @@ async def delete_council_preset(preset_id: str):
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest, http_request: Request):
     """
-    Send a message and stream the 3-stage council process.
+    Send a message and stream the council process.
     Returns Server-Sent Events as each stage completes.
     """
     # Check if conversation exists
@@ -782,73 +783,77 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 return
 
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            user_token_count = estimate_token_count(request.content)
+            storage.add_user_message(conversation_id, request.content, token_count=user_token_count)
 
-            # Start title generation in parallel (don't await yet)
-            title_task = None
             if is_first_message:
+                # Snapshot current settings for this conversation
+                current_settings = get_settings()
+                storage.save_settings_snapshot(conversation_id, current_settings)
+
+                # Start title generation in parallel (don't await yet)
                 title_task = asyncio.create_task(generate_conversation_title(request.content, api_key=bedrock_key))
 
-            # Stage 1: Collect responses
-            await event_queue.put({"type": "stage1_start"})
-            stage1_results = await stage1_collect_responses(request.content, api_key=bedrock_key)
-            await event_queue.put({"type": "stage1_complete", "data": stage1_results})
+                async def on_stage_start(stage_entry: Dict[str, Any]) -> None:
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    await event_queue.put({"type": "stage_start", "data": stage_entry})
 
-            if cancel_event.is_set():
-                await event_queue.put({"type": "cancelled"})
-                return
+                async def on_stage_complete(stage_entry: Dict[str, Any]) -> None:
+                    await event_queue.put({"type": "stage_complete", "data": stage_entry})
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
 
-            # Stage 2: Collect rankings
-            await event_queue.put({"type": "stage2_start"})
-            stage2_results, label_to_model = await stage2_collect_rankings(
-                request.content,
-                stage1_results,
-                api_key=bedrock_key,
-            )
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            await event_queue.put({
-                "type": "stage2_complete",
-                "data": stage2_results,
-                "metadata": {
-                    "label_to_model": label_to_model,
-                    "aggregate_rankings": aggregate_rankings,
-                },
-            })
+                stages, _ = await run_full_council(
+                    request.content,
+                    api_key=bedrock_key,
+                    settings=current_settings,
+                    on_stage_start=on_stage_start,
+                    on_stage_complete=on_stage_complete,
+                )
 
-            if cancel_event.is_set():
-                await event_queue.put({"type": "cancelled"})
-                return
-
-            # Stage 3: Synthesize final answer
-            await event_queue.put({"type": "stage3_start"})
-            stage3_result = await stage3_synthesize_final(
-                request.content,
-                stage1_results,
-                stage2_results,
-                api_key=bedrock_key,
-            )
-            await event_queue.put({"type": "stage3_complete", "data": stage3_result})
-
-            if cancel_event.is_set():
-                await event_queue.put({"type": "cancelled"})
-                return
-
-            # Wait for title generation if it was started
-            if title_task:
+                # Wait for title generation
                 title = await title_task
                 storage.update_conversation_title(conversation_id, title)
                 await event_queue.put({"type": "title_complete", "data": {"title": title}})
 
-            # Save complete assistant message
-            storage.add_assistant_message(
-                conversation_id,
-                stage1_results,
-                stage2_results,
-                stage3_result
-            )
+                final_result = get_final_response(stages)
+                response_tokens = estimate_token_count(str(final_result.get("response", "")))
 
-            # Send completion event
-            await event_queue.put({"type": "complete"})
+                # Save complete assistant message
+                storage.add_assistant_message(
+                    conversation_id,
+                    stages,
+                    token_count=response_tokens,
+                )
+
+                # Send completion event
+                await event_queue.put({"type": "complete"})
+            else:
+                # Follow-up message: Use council speaker only
+                if cancel_event.is_set():
+                    await event_queue.put({"type": "cancelled"})
+                    return
+
+                # Refresh conversation to include the new user message
+                conversation_snapshot = storage.get_conversation(conversation_id) or {}
+                settings = conversation_snapshot.get("settings_snapshot") or get_settings()
+
+                speaker_response = await query_council_speaker(
+                    request.content,
+                    conversation_snapshot.get("messages", []),
+                    settings,
+                    api_key=bedrock_key,
+                )
+
+                storage.add_speaker_message(
+                    conversation_id,
+                    speaker_response.get("response", ""),
+                    token_count=speaker_response.get("token_count", 0),
+                )
+
+                await event_queue.put({"type": "speaker_complete", "data": speaker_response})
+                await event_queue.put({"type": "complete"})
         except asyncio.CancelledError:
             await asyncio.shield(event_queue.put({"type": "cancelled"}))
             raise
@@ -919,11 +924,3 @@ async def cancel_message_stream(conversation_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
-# Ensure database connectivity on startup.
-@app.on_event("startup")
-async def _startup_check_db() -> None:
-    try:
-        db.check_db()
-    except Exception as exc:
-        print(f"Database health check failed: {exc}")
-        raise

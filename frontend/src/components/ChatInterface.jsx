@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Stage1 from './Stage1';
-import Stage2 from './Stage2';
-import Stage3 from './Stage3';
+import StageResponses from './StageResponses';
+import StageRankings from './StageRankings';
+import StageSynthesis from './StageSynthesis';
 import './ChatInterface.css';
 
 function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', className }) {
@@ -70,23 +70,14 @@ export default function ChatInterface({
     }
   };
 
-  const buildLabelMap = (message) => {
-    if (message?.metadata?.label_to_model) {
-      return message.metadata.label_to_model;
+  const buildLabelMap = (stages) => {
+    if (!Array.isArray(stages)) return null;
+    for (const stage of stages) {
+      if (stage?.label_to_model) {
+        return stage.label_to_model;
+      }
     }
-    if (!message?.stage1 || !Array.isArray(message.stage1)) return null;
-
-    const successful = message.stage1.filter(
-      (result) => result.status !== 'failed' && result.response
-    );
-    if (!successful.length) return null;
-
-    const labelMap = {};
-    successful.forEach((result, index) => {
-      const label = `Response ${String.fromCharCode(65 + index)}`;
-      labelMap[label] = result.model;
-    });
-    return labelMap;
+    return null;
   };
 
   const renderDynamicStages = (message) => {
@@ -94,11 +85,20 @@ export default function ChatInterface({
     if (!Array.isArray(stages) || stages.length === 0) {
       return null;
     }
+    const labelMap = buildLabelMap(stages);
     return stages.map((stage, stageIndex) => {
-      const stageLabelMap = stage.label_to_model || buildLabelMap(message);
+      const stageLabelMap = stage.label_to_model || labelMap;
+      if (stage.status === 'running') {
+        return (
+          <div key={stage.id || stageIndex} className="stage-loading">
+            <div className="spinner"></div>
+            <span>Running: {stage.name || `Stage ${stageIndex + 1}`}...</span>
+          </div>
+        );
+      }
       if (stage.kind === 'rankings') {
         return (
-          <Stage2
+          <StageRankings
             key={stage.id || stageIndex}
             rankings={stage.results}
             labelToModel={stageLabelMap}
@@ -110,7 +110,7 @@ export default function ChatInterface({
       }
       if (stage.kind === 'synthesis') {
         return (
-          <Stage3
+          <StageSynthesis
             key={stage.id || stageIndex}
             finalResponse={stage.results}
             labelToModel={stageLabelMap}
@@ -120,7 +120,7 @@ export default function ChatInterface({
         );
       }
       return (
-        <Stage1
+        <StageResponses
           key={stage.id || stageIndex}
           responses={stage.results}
           stageName={stage.name}
@@ -234,56 +234,7 @@ export default function ChatInterface({
               ) : (
                 <div className="assistant-message">
                   <div className="message-label">🏛️ LLM Council</div>
-                  {(() => {
-                    const labelToModel = buildLabelMap(msg);
-                    const dynamicStages = renderDynamicStages(msg);
-                    return (
-                      <>
-                        {dynamicStages}
-                        {!dynamicStages && (
-                          <>
-                            {/* Stage 1 */}
-                            {msg.loading?.stage1 && (
-                              <div className="stage-loading">
-                                <div className="spinner"></div>
-                                <span>Running: Collecting individual responses...</span>
-                              </div>
-                            )}
-                            {msg.stage1 && <Stage1 responses={msg.stage1} />}
-
-                            {/* Stage 2 */}
-                            {msg.loading?.stage2 && (
-                              <div className="stage-loading">
-                                <div className="spinner"></div>
-                                <span>Running: Peer rankings...</span>
-                              </div>
-                            )}
-                            {msg.stage2 && (
-                              <Stage2
-                                rankings={msg.stage2}
-                                labelToModel={labelToModel}
-                                aggregateRankings={msg.metadata?.aggregate_rankings}
-                              />
-                            )}
-
-                            {/* Stage 3 */}
-                            {msg.loading?.stage3 && (
-                              <div className="stage-loading">
-                                <div className="spinner"></div>
-                                <span>Running: Final synthesis...</span>
-                              </div>
-                            )}
-                            {msg.stage3 && (
-                              <Stage3
-                                finalResponse={msg.stage3}
-                                labelToModel={labelToModel}
-                              />
-                            )}
-                          </>
-                        )}
-                      </>
-                    );
-                  })()}
+                  {renderDynamicStages(msg)}
                 </div>
               )}
             </div>

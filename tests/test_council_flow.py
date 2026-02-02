@@ -104,28 +104,28 @@ class CouncilSettingsValidationTest(unittest.TestCase):
 
 class CouncilPipelineTest(unittest.IsolatedAsyncioTestCase):
     async def test_run_full_council_uses_pipeline_metadata(self):
-        stage1_results = [
+        response_results = [
             {"model": "Alpha", "response": "A", "status": "ok"},
             {"model": "Beta", "response": "B", "status": "ok"},
         ]
-        stage2_results = [
+        ranking_results = [
             {"model": "Alpha", "ranking": "FINAL RANKING:\n1. Response A\n2. Response B"}
         ]
         label_to_model = {"Response A": "Alpha", "Response B": "Beta"}
-        stage3_result = {"model": "Chairman", "response": "Final"}
+        synthesis_result = {"model": "Chairman", "response": "Final"}
 
-        with patch.object(council, "_collect_stage_responses", return_value=stage1_results), \
-            patch.object(council, "stage2_collect_rankings", return_value=(stage2_results, label_to_model)), \
-            patch.object(council, "stage3_synthesize_final", return_value=stage3_result):
-            result_stage1, result_stage2, result_stage3, metadata, stages = await council.run_full_council("Question")
+        with patch.object(council, "_collect_stage_responses", return_value=response_results), \
+            patch.object(council, "collect_rankings", return_value=(ranking_results, label_to_model)), \
+            patch.object(council, "synthesize_final", return_value=synthesis_result):
+            stages, metadata = await council.run_full_council("Question")
 
-        self.assertEqual(result_stage1, stage1_results)
-        self.assertEqual(result_stage2, stage2_results)
-        self.assertEqual(result_stage3, stage3_result)
         self.assertIn("aggregate_rankings", metadata)
         self.assertEqual(metadata["aggregate_rankings"][0]["model"], "Alpha")
         self.assertEqual(metadata["aggregate_rankings"][0]["average_rank"], 1.0)
         self.assertEqual(len(stages), 3)
+        self.assertEqual(stages[0]["results"], response_results)
+        self.assertEqual(stages[1]["results"], ranking_results)
+        self.assertEqual(stages[2]["results"], synthesis_result)
 
     async def test_run_full_council_includes_stage_prompts(self):
         settings = {
@@ -146,7 +146,7 @@ class CouncilPipelineTest(unittest.IsolatedAsyncioTestCase):
         stage1_results = [{"model": "Alpha", "response": "A", "status": "ok"}]
         with patch.object(council, "get_settings", return_value=settings), \
             patch.object(council, "_collect_stage_responses", return_value=stage1_results):
-            _, _, _, _, stages = await council.run_full_council("Question")
+            stages, _ = await council.run_full_council("Question")
         self.assertEqual(stages[0]["name"], "Brainstorm")
         self.assertEqual(stages[0]["prompt"], "Focus on key ideas.")
 
@@ -161,6 +161,42 @@ class CouncilPresetsTest(unittest.TestCase):
             ):
             with self.assertRaises(ValueError):
                 council_presets.create_preset(council_presets.DEFAULT_PRESET_NAME, {})
+
+
+class CouncilStagesOnlyTest(unittest.TestCase):
+    def test_get_final_response_returns_last_synthesis(self):
+        stages = [
+            {
+                "id": "stage-1",
+                "kind": "responses",
+                "results": [{"model": "Alpha", "response": "A", "status": "ok"}],
+            },
+            {
+                "id": "stage-2",
+                "kind": "synthesis",
+                "results": {"model": "Chairman", "response": "Final answer"},
+            },
+        ]
+        final_response = council.get_final_response(stages)
+        self.assertEqual(final_response.get("response"), "Final answer")
+
+    def test_build_speaker_context_minimal_uses_stages(self):
+        conversation_messages = [
+            {
+                "role": "assistant",
+                "message_type": "council",
+                "stages": [
+                    {
+                        "id": "stage-3",
+                        "kind": "synthesis",
+                        "name": "Final",
+                        "results": {"model": "Chairman", "response": "Council synthesis"},
+                    }
+                ],
+            }
+        ]
+        context = council._build_speaker_context(conversation_messages, {}, context_level="minimal")
+        self.assertIn("Council synthesis", context)
 
 
 if __name__ == "__main__":
