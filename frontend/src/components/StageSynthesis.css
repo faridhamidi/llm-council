@@ -59,6 +59,10 @@
   color: var(--text-secondary);
   line-height: 1.7;
   font-size: 14px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 @media (max-width: 780px) {

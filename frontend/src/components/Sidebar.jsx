@@ -798,8 +798,7 @@ export default function Sidebar({
                           ? 'drag-over'
                           : ''
                           }`}
-                        draggable
-                        onDragStart={() => handleStageDragStart(stageIndex)}
+                        draggable={false}
                         onDragOver={(event) => {
                           event.preventDefault();
                           // Handle stage reordering feedback
@@ -827,7 +826,21 @@ export default function Sidebar({
                       >
                         <div className="stage-row-header">
                           <div className="stage-header-left">
-                            <div className="stage-drag-handle">⋮⋮</div>
+                            <div
+                              className="stage-drag-handle"
+                              draggable="true"
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move';
+                                // Set the drag image to the whole card
+                                const card = e.target.closest('.stage-card-row');
+                                if (card) {
+                                  e.dataTransfer.setDragImage(card, 0, 0);
+                                }
+                                handleStageDragStart(stageIndex);
+                              }}
+                            >
+                              ⋮⋮
+                            </div>
                             <div>
                               <div className="stage-kicker">Stage {stageIndex + 1}</div>
                               <input
@@ -911,11 +924,7 @@ export default function Sidebar({
                                   <div
                                     key={memberId}
                                     className={`member-card-inline ${draggedMember?.memberId === memberId ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.stopPropagation();
-                                      handleMemberDragStart(memberId, stage.id);
-                                    }}
+                                    draggable={false}
                                     onDragEnd={(e) => {
                                       e.stopPropagation();
                                       setDraggedMember(null);
@@ -939,6 +948,21 @@ export default function Sidebar({
                                     }}
                                   >
                                     <div className="member-card-inline-header">
+                                      <div
+                                        className="member-drag-handle"
+                                        draggable="true"
+                                        onDragStart={(e) => {
+                                          e.stopPropagation();
+                                          e.dataTransfer.effectAllowed = 'move';
+                                          const card = e.target.closest('.member-card-inline');
+                                          if (card) {
+                                            e.dataTransfer.setDragImage(card, 0, 0);
+                                          }
+                                          handleMemberDragStart(memberId, stage.id);
+                                        }}
+                                      >
+                                        ⋮⋮
+                                      </div>
                                       <span className="member-number">{memberIndex + 1}</span>
                                       <input
                                         type="text"

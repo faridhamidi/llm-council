@@ -31,6 +31,8 @@ from .council_settings import (
     MAX_STAGE_MEMBERS,
     build_default_stages,
     normalize_settings_for_region,
+    regenerate_settings_ids,
+    sanitize_settings_ids,
 )
 from .council_presets import (
     list_presets,
@@ -45,6 +47,26 @@ from .council import (
     query_council_speaker,
     estimate_token_count,
 )
+
+def calculate_council_output_count(messages: List[Dict[str, Any]]) -> int:
+    """
+    Calculate the total number of council outputs (responses) generated in the conversation.
+    This iterates through all messages, finds 'council' type messages, and sums up the
+    number of results in all stages.
+    """
+    count = 0
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("message_type") == "council":
+            stages = msg.get("stages", [])
+            for stage in stages:
+                results = stage.get("results")
+                if isinstance(results, list):
+                    # List of results (e.g. from parallel execution or rankings)
+                    count += len(results)
+                elif isinstance(results, dict):
+                    # Single result (e.g. synthesis)
+                    count += 1
+    return count
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -359,19 +381,27 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             "message_type": "council",
             "metadata": metadata,
             "stages": stages,
-            "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
+            "remaining_messages": MAX_FOLLOW_UP_MESSAGES + calculate_council_output_count(updated_conversation.get("messages", [])),
             "total_tokens": updated_conversation.get("total_tokens", 0),
         }
     else:
         # Follow-up message: Use council speaker
         
+        
         # Count user messages to check limit (exclude the one we just added)
         user_message_count = sum(1 for msg in conversation["messages"] if msg.get("role") == "user")
         
-        if user_message_count >= MAX_FOLLOW_UP_MESSAGES:
+        # Calculate dynamic limit based on council outputs
+        council_outputs = calculate_council_output_count(conversation["messages"])
+        dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
+
+        # First message uses 0 follow-ups.
+        used_followups = max(0, user_message_count - 1)
+        
+        if used_followups >= dynamic_limit:
             raise HTTPException(
                 status_code=400,
-                detail=f"Message limit reached. Maximum {MAX_FOLLOW_UP_MESSAGES} follow-up messages per conversation."
+                detail=f"Message limit reached. Maximum {dynamic_limit} follow-up messages allowed for this conversation."
             )
         
         # Get settings snapshot (or current settings as fallback)
@@ -396,7 +426,16 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         )
         
         # Calculate remaining messages
-        remaining = MAX_FOLLOW_UP_MESSAGES - user_message_count - 1
+        # Calculate remaining messages
+        # Re-calc limit in case it changed (it shouldn't have, but good to be safe)
+        council_outputs = calculate_council_output_count(conversation["messages"])
+        dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
+        
+        # user_message_count was calculated BEFORE adding current message, so add 1 to get current count
+        current_user_count = user_message_count + 1
+        used_followups = max(0, current_user_count - 1)
+        
+        remaining = max(0, dynamic_limit - used_followups)
         
         # Refresh conversation to get updated token count
         updated_conversation = storage.get_conversation(conversation_id)
@@ -477,7 +516,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             "message_type": "council",
             "metadata": metadata,
             "stages": stages,
-            "remaining_messages": MAX_FOLLOW_UP_MESSAGES,
+            "remaining_messages": MAX_FOLLOW_UP_MESSAGES + calculate_council_output_count(updated_conversation.get("messages", [])),
             "total_tokens": updated_conversation.get("total_tokens", 0),
         }
     else:
@@ -495,7 +534,15 @@ async def retry_message(conversation_id: str, http_request: Request):
             token_count=speaker_response.get("token_count", 0),
         )
         
-        remaining = MAX_FOLLOW_UP_MESSAGES - user_message_count
+        council_outputs = calculate_council_output_count(updated_conversation.get("messages", []))
+        dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
+        used_followups = max(0, user_message_count) # user_message_count here includes only the ones before retry? No wait.
+        # Logic in retry: we found last user msg, deleted assistant msg.
+        # So user_message_count is the total user messages.
+        # If it was a follow-up, used_followups = user_message_count - 1.
+        used_followups = max(0, user_message_count - 1)
+        
+        remaining = max(0, dynamic_limit - used_followups)
         updated_conversation = storage.get_conversation(conversation_id)
         
         return {
@@ -521,8 +568,13 @@ async def get_conversation_info(conversation_id: str):
     user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
     
     # First message doesn't count against limit
+    # First message doesn't count against limit
     follow_up_count = max(0, user_message_count - 1)
-    remaining = MAX_FOLLOW_UP_MESSAGES - follow_up_count
+    
+    council_outputs = calculate_council_output_count(messages)
+    dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
+    
+    remaining = max(0, dynamic_limit - follow_up_count)
     
     return {
         "id": conversation.get("id"),
@@ -530,7 +582,7 @@ async def get_conversation_info(conversation_id: str):
         "message_count": len(messages),
         "user_message_count": user_message_count,
         "remaining_messages": remaining,
-        "max_follow_up_messages": MAX_FOLLOW_UP_MESSAGES,
+        "max_follow_up_messages": dynamic_limit,
         "total_tokens": conversation.get("total_tokens", 0),
         "has_settings_snapshot": conversation.get("settings_snapshot") is not None,
     }
@@ -713,7 +765,8 @@ async def create_council_preset(request: CouncilPresetRequest):
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     try:
-        preset = create_preset(name, request.settings.model_dump())
+        clean_settings = sanitize_settings_ids(request.settings.model_dump())
+        preset = create_preset(name, clean_settings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"errors": [str(exc)]}) from exc
     was_updated = "updated_at" in preset
@@ -728,7 +781,11 @@ async def apply_council_preset(request: CouncilPresetApplyRequest):
         raise HTTPException(status_code=404, detail="Preset not found")
 
     region = get_bedrock_region()
+    # Normalize settings first (resolves models)
     settings = normalize_settings_for_region(preset.get("settings", {}), region)
+    
+    # Regenerate IDs to ensure uniqueness and unlink from preset defaults
+    settings = regenerate_settings_ids(settings)
 
     try:
         payload = CouncilSettingsRequest.model_validate(settings)

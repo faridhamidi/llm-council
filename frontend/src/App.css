@@ -26,6 +26,7 @@
 .chat-panel {
   position: relative;
   z-index: 1;
+  min-width: 0;
 }
 
 .mobile-topbar {

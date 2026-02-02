@@ -117,6 +117,10 @@
 .response-text {
   color: var(--text-secondary);
   line-height: 1.7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 @media (max-width: 780px) {

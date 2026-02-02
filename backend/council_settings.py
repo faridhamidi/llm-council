@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -79,6 +80,117 @@ def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
+def regenerate_settings_ids(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Regenerate IDs for members and stages.
+    CRITICAL: This creates INDEPENDENT copies of members for each stage.
+    If 'Member 1' is used in Stage 1 and Stage 2, it becomes two distinct members
+    (e.g., 'Stage 1 Member 1' and 'Stage 2 Member 1') with different IDs.
+    """
+    new_settings = json.loads(json.dumps(settings)) # Deep copy
+    
+    # map old_id -> member dict
+    source_members = {m.get("id"): m for m in new_settings.get("members", [])}
+    
+    final_members = []
+    new_chairman_id = None
+    original_chairman_id = new_settings.get("chairman_id")
+
+    # Iterate through stages and explode members
+    if "stages" in new_settings:
+        for stage in new_settings["stages"]:
+            stage["id"] = str(uuid.uuid4()) # New stage ID
+            
+            old_member_ids = stage.get("member_ids", [])
+            new_stage_member_ids = []
+            
+            for old_mid in old_member_ids:
+                source_member = source_members.get(old_mid)
+                if source_member:
+                    # Create a fresh copy for this stage
+                    new_member = json.loads(json.dumps(source_member))
+                    new_mid = str(uuid.uuid4())
+                    new_member["id"] = new_mid
+                    
+                    # Add to final list
+                    final_members.append(new_member)
+                    new_stage_member_ids.append(new_mid)
+                    
+                    # Update chairman reference if matches
+                    # We pin the chairman ID to the first valid occurrence encountered
+                    if old_mid == original_chairman_id and new_chairman_id is None:
+                        new_chairman_id = new_mid
+                else:
+                    # Referenced member doesn't exist? Skip or keep?
+                    pass
+            
+            stage["member_ids"] = new_stage_member_ids
+
+    # If chairman was not found in any stage (unlikely for valid presets), 
+    # we must ensure it exists or pick one.
+    if original_chairman_id and new_chairman_id is None:
+        # Check if original chairman is in source_members
+        chairman_source = source_members.get(original_chairman_id)
+        if chairman_source:
+             new_c = json.loads(json.dumps(chairman_source))
+             new_cid = str(uuid.uuid4())
+             new_c["id"] = new_cid
+             final_members.append(new_c)
+             new_chairman_id = new_cid
+
+    new_settings["members"] = final_members
+    if new_chairman_id:
+        new_settings["chairman_id"] = new_chairman_id
+    elif final_members:
+        # Fallback: make first member chairman
+        new_settings["chairman_id"] = final_members[0]["id"]
+
+    return new_settings
+
+
+def sanitize_settings_ids(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert internal UUIDs to clean, deterministic human-readable IDs for export/storage.
+    e.g. "member-1", "stage-1".
+    This decouples the preset from specific runtime IDs.
+    """
+    new_settings = json.loads(json.dumps(settings))
+    
+    # Map old Member UUID -> new "clean" ID (e.g. "member-1")
+    member_map = {}
+    clean_members = []
+    
+    for idx, member in enumerate(new_settings.get("members", [])):
+        old_id = member.get("id")
+        new_id = f"member-{idx + 1}"
+        member_map[old_id] = new_id
+        member["id"] = new_id
+        clean_members.append(member)
+    
+    new_settings["members"] = clean_members
+
+    # Update Chairman ID
+    old_chairman_id = new_settings.get("chairman_id")
+    if old_chairman_id in member_map:
+        new_settings["chairman_id"] = member_map[old_chairman_id]
+
+    # Map old Stage UUID -> new "clean" ID (e.g. "stage-1")
+    clean_stages = []
+    for idx, stage in enumerate(new_settings.get("stages", [])):
+        stage["id"] = f"stage-{idx + 1}"
+        
+        # Update Member IDs in Stage
+        new_member_ids = []
+        for mid in stage.get("member_ids", []):
+            if mid in member_map:
+                new_member_ids.append(member_map[mid])
+        stage["member_ids"] = new_member_ids
+        clean_stages.append(stage)
+
+    new_settings["stages"] = clean_stages
+    return new_settings
+
+
 def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None) -> List[Dict[str, Any]]:
     member_ids = [member.get("id") for member in members if member.get("id")]
     default_chairman = chairman_id if chairman_id in member_ids else (member_ids[0] if member_ids else "")
@@ -87,14 +199,14 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
         "name": "Individual Responses",
         "prompt": "",
         "execution_mode": "parallel",
-        "member_ids": member_ids,
+        "member_ids": list(member_ids),
     }
     stage2 = {
         "id": "stage-2",
         "name": "Peer Rankings",
         "prompt": DEFAULT_STAGE2_PROMPT,
         "execution_mode": "parallel",
-        "member_ids": member_ids,
+        "member_ids": list(member_ids),
     }
     stage3 = {
         "id": "stage-3",
@@ -118,7 +230,8 @@ def ensure_stage_config(settings: Dict[str, Any]) -> Dict[str, Any]:
     members = settings.get("members", [])
     chairman_id = settings.get("chairman_id")
     settings["stages"] = build_default_stages(members, chairman_id)
-    return settings
+    # DECOUPLE: ensuring default stages don't share member objects
+    return regenerate_settings_ids(settings)
 
 
 def _default_settings() -> Dict[str, Any]:
@@ -235,3 +348,6 @@ def normalize_settings_for_region(settings: Dict[str, Any], region: str) -> Dict
     if next_settings.get("title_model_id"):
         next_settings["title_model_id"] = resolve_model_for_region(next_settings["title_model_id"], region)
     return ensure_stage_config(next_settings)
+
+
+
