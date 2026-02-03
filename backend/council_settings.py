@@ -18,9 +18,9 @@ from .config import (
 )
 from .db import with_connection
 
-MAX_COUNCIL_MEMBERS = 7
+MAX_COUNCIL_MEMBERS = 64
 MAX_COUNCIL_STAGES = 10
-MAX_STAGE_MEMBERS = 5
+MAX_STAGE_MEMBERS = 6
 
 DEFAULT_STAGE2_PROMPT = """You are evaluating different responses to the following question:
 
@@ -156,14 +156,15 @@ def sanitize_settings_ids(settings: Dict[str, Any]) -> Dict[str, Any]:
     """
     new_settings = json.loads(json.dumps(settings))
     
-    # Map old Member UUID -> new "clean" ID (e.g. "member-1")
-    member_map = {}
+    # Map old Member UUID -> ordered list of new "clean" IDs (e.g. "member-1")
+    # This preserves intent even if duplicate member IDs slipped in.
+    member_map: Dict[str, List[str]] = {}
     clean_members = []
     
     for idx, member in enumerate(new_settings.get("members", [])):
         old_id = member.get("id")
         new_id = f"member-{idx + 1}"
-        member_map[old_id] = new_id
+        member_map.setdefault(old_id, []).append(new_id)
         member["id"] = new_id
         clean_members.append(member)
     
@@ -172,7 +173,7 @@ def sanitize_settings_ids(settings: Dict[str, Any]) -> Dict[str, Any]:
     # Update Chairman ID
     old_chairman_id = new_settings.get("chairman_id")
     if old_chairman_id in member_map:
-        new_settings["chairman_id"] = member_map[old_chairman_id]
+        new_settings["chairman_id"] = member_map[old_chairman_id][0]
 
     # Map old Stage UUID -> new "clean" ID (e.g. "stage-1")
     clean_stages = []
@@ -181,10 +182,27 @@ def sanitize_settings_ids(settings: Dict[str, Any]) -> Dict[str, Any]:
         
         # Update Member IDs in Stage
         new_member_ids = []
+        seen_counts: Dict[str, int] = {}
         for mid in stage.get("member_ids", []):
-            if mid in member_map:
-                new_member_ids.append(member_map[mid])
-        stage["member_ids"] = new_member_ids
+            if mid not in member_map:
+                continue
+            occurrence = seen_counts.get(mid, 0)
+            mapped_ids = member_map[mid]
+            if occurrence < len(mapped_ids):
+                new_member_ids.append(mapped_ids[occurrence])
+                seen_counts[mid] = occurrence + 1
+            else:
+                # Fallback to first mapped id if stage references exceed member list
+                new_member_ids.append(mapped_ids[0])
+        # Deduplicate while preserving order to avoid duplicate member IDs in presets
+        deduped_member_ids = []
+        seen_member_ids = set()
+        for mid in new_member_ids:
+            if mid in seen_member_ids:
+                continue
+            seen_member_ids.add(mid)
+            deduped_member_ids.append(mid)
+        stage["member_ids"] = deduped_member_ids
         clean_stages.append(stage)
 
     new_settings["stages"] = clean_stages
@@ -221,6 +239,27 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
 def ensure_stage_config(settings: Dict[str, Any]) -> Dict[str, Any]:
     if settings.get("stages"):
         stages = settings.get("stages", [])
+        # Enforce Final Synthesis stage existence and structure
+        last_stage = stages[-1] if stages else None
+        chairman_id = settings.get("chairman_id")
+        
+        # If no stages or last stage isn't synthesis-like, append one
+        if not last_stage or last_stage.get("id") != "stage-3" and "Synthesis" not in last_stage.get("name", ""):
+             # Check if we have a "stage-3" equivalent hidden somewhere? 
+             # For now, let's just append the default synthesis stage if missing
+             stages.append({
+                "id": "stage-3",
+                "name": "Final Synthesis",
+                "prompt": DEFAULT_STAGE3_PROMPT,
+                "execution_mode": "sequential",
+                "member_ids": [chairman_id] if chairman_id else [],
+            })
+        
+        # Always ensure the last stage (Synthesis) uses the Chairman
+        if stages:
+            stages[-1]["member_ids"] = [chairman_id] if chairman_id else []
+            stages[-1]["prompt"] = stages[-1].get("prompt") or DEFAULT_STAGE3_PROMPT
+            
         for stage in stages:
             if stage.get("id") == "stage-2" and not stage.get("prompt"):
                 stage["prompt"] = DEFAULT_STAGE2_PROMPT
@@ -348,6 +387,4 @@ def normalize_settings_for_region(settings: Dict[str, Any], region: str) -> Dict
     if next_settings.get("title_model_id"):
         next_settings["title_model_id"] = resolve_model_for_region(next_settings["title_model_id"], region)
     return ensure_stage_config(next_settings)
-
-
 

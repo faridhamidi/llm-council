@@ -5,7 +5,7 @@
 .stage-rankings h4 {
   margin: 20px 0 8px 0;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   font-weight: 600;
   letter-spacing: 0.4px;
 }
@@ -17,7 +17,7 @@
 .stage-description {
   margin: 0 0 12px 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   line-height: 1.6;
 }
 
@@ -28,7 +28,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -44,7 +44,7 @@
 .aggregate-rankings h4 {
   margin: 0 0 12px 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .aggregate-list {
@@ -66,7 +66,7 @@
 .rank-position {
   color: var(--accent-green-light);
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--font-size-body);
   min-width: 35px;
 }
 
@@ -74,19 +74,19 @@
   flex: 1;
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   font-weight: 500;
 }
 
 .rank-score {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   font-family: var(--font-mono);
 }
 
 .rank-count {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .stage-rankings .tabs {
@@ -103,7 +103,7 @@
   border-radius: 10px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-small);
   transition: all 0.2s ease;
 }
 
@@ -139,7 +139,7 @@
 
 .ranking-model {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   font-family: var(--font-mono);
   margin: 0;
 }
@@ -150,7 +150,7 @@
   border: 1px solid rgba(62, 207, 142, 0.4);
   background: rgba(62, 207, 142, 0.12);
   color: var(--accent-green-light);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -164,7 +164,7 @@
 .ranking-content {
   color: var(--text-secondary);
   line-height: 1.7;
-  font-size: 13px;
+  font-size: var(--font-size-small);
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -179,7 +179,7 @@
 
 .parsed-ranking strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   letter-spacing: 0.3px;
 }
 
@@ -192,21 +192,21 @@
 .parsed-ranking li {
   margin: 4px 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-small);
 }
 
 @media (max-width: 780px) {
   .stage-rankings h4 {
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .stage-description {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .stage-rankings .tab {
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .stage-rankings .tab-content {
@@ -214,11 +214,11 @@
   }
 
   .ranking-content {
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .copy-stage-btn {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .aggregate-rankings {
@@ -231,16 +231,16 @@
   }
 
   .rank-position {
-    font-size: 13px;
+    font-size: var(--font-size-small);
     min-width: 28px;
   }
 
   .rank-model {
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .rank-score {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .rank-count {

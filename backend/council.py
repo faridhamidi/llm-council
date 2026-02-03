@@ -52,13 +52,54 @@ def _council_config() -> Tuple[
     )
 
 
+def _format_conversation_history(messages: List[Dict[str, Any]] | None) -> str:
+    """
+    Format conversation history into a readable string context.
+    """
+    if not messages:
+        return ""
+    
+    lines = []
+    for msg in messages:
+        role = msg.get("role")
+        
+        if role == "user":
+            content = msg.get("content", "")
+            if content:
+                lines.append(f"User: {content}")
+                
+        elif role == "assistant":
+             msg_type = msg.get("message_type", "council")
+             if msg_type == "speaker":
+                 response = msg.get("response", "")
+                 if response:
+                     lines.append(f"Council Speaker: {response}")
+             else:
+                 # For full council responses, we might want to summarize or just indicate it occurred
+                 # For now, let's just say [Council Deliberation] to avoid huge context bloat,
+                 # unless we want to extract the final synthesis.
+                 # Let's try to extract final synthesis if available.
+                 stages = msg.get("stages") or []
+                 final = get_final_response(stages)
+                 response = final.get("response", "[Council Deliberation]")
+                 lines.append(f"Council: {response}")
+                 
+    return "\n\n".join(lines)
+
+
 def _format_stage_prompt(
     stage_prompt: str | None,
     user_query: str,
     prior_context: str | None = None,
     template_values: Dict[str, str] | None = None,
+    conversation_history: str | None = None,
 ) -> str:
     prompt_parts = []
+    
+    # 1. Conversation History (Context)
+    if conversation_history:
+        prompt_parts.append("=== Conversation Context ===\n" + conversation_history)
+        
     if stage_prompt:
         values = {
             "question": user_query,
@@ -105,6 +146,7 @@ async def _collect_stage_responses(
     prior_results: List[Dict[str, Any]] | None = None,
     responses_context: List[Dict[str, Any]] | None = None,
     rankings_context: List[Dict[str, Any]] | None = None,
+    conversation_history: str | None = None,
 ) -> List[Dict[str, Any]]:
     response_count = len(prior_results) if prior_results else 0
     response_labels = ", ".join([
@@ -125,6 +167,7 @@ async def _collect_stage_responses(
             "stage1": responses_text,
             "stage2": rankings_text,
         },
+        conversation_history=conversation_history,
     )
     messages = [{"role": "user", "content": prompt_text}]
     tasks = []
@@ -179,6 +222,7 @@ async def collect_rankings(
     stage_prompt: str | None = None,
     execution_mode: str = "parallel",
     stage_members: List[Dict[str, Any]] | None = None,
+    conversation_history: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Each model ranks the anonymized responses.
@@ -217,18 +261,23 @@ async def collect_rankings(
     response_labels = [f"Response {label}" for label in labels]
     response_count = len(response_labels)
 
-    prompt_template = stage_prompt or DEFAULT_STAGE2_PROMPT
-    ranking_prompt = _apply_prompt_template(
-        prompt_template,
-        {
+    # If using custom template, we should probably stick to _apply_prompt_template, but we want to inject history.
+    # The original code called _apply_prompt_template directly.
+    # Let's use _format_stage_prompt which handles both default and templating + history.
+    
+    prompt_text = _format_stage_prompt(
+        stage_prompt or DEFAULT_STAGE2_PROMPT,
+        user_query,
+        template_values={
             "question": user_query,
             "responses": responses_text,
             "response_count": str(response_count),
             "response_labels": ", ".join(response_labels),
         },
+        conversation_history=conversation_history,
     )
 
-    messages = [{"role": "user", "content": ranking_prompt}]
+    messages = [{"role": "user", "content": prompt_text}]
 
     # Get rankings from all council models
     members, _, _, _, _, use_stage2_prompt, _ = _council_config()
@@ -278,6 +327,7 @@ async def synthesize_final(
     api_key: str | None = None,
     stage_prompt: str | None = None,
     stage_members: List[Dict[str, Any]] | None = None,
+    conversation_history: str | None = None,
 ) -> Dict[str, Any]:
     """
     Chairman synthesizes final response.
@@ -309,17 +359,18 @@ async def synthesize_final(
         for result in rankings
     ])
 
-    prompt_template = stage_prompt or DEFAULT_STAGE3_PROMPT
-    chairman_prompt = _apply_prompt_template(
-        prompt_template,
-        {
+    prompt_text = _format_stage_prompt(
+        stage_prompt or DEFAULT_STAGE3_PROMPT,
+        user_query,
+        template_values={
             "question": user_query,
             "stage1": responses_text,
             "stage2": rankings_text,
         },
+        conversation_history=conversation_history,
     )
 
-    messages = [{"role": "user", "content": chairman_prompt}]
+    messages = [{"role": "user", "content": prompt_text}]
 
     # Query the chairman model
     members, _, chairman_model_id, chairman_label, _, _, use_stage3_prompt = _council_config()
@@ -506,6 +557,7 @@ async def run_full_council(
     settings: Dict[str, Any] | None = None,
     on_stage_start: StageEventHandler | None = None,
     on_stage_complete: StageEventHandler | None = None,
+    conversation_messages: List[Dict[str, Any]] | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Run the council pipeline using the configured stages.
@@ -515,11 +567,12 @@ async def run_full_council(
         settings: Optional settings snapshot to lock this run
         on_stage_start: Optional async callback before a stage runs
         on_stage_complete: Optional async callback after a stage completes
-
-    Returns:
-        Tuple of (stages_output, metadata)
+        conversation_messages: History of the conversation for context
     """
     settings = settings or get_settings()
+    
+    # Format history once
+    history_text = _format_conversation_history(conversation_messages) if conversation_messages else None
     members = settings.get("members", [])
     stages_config = settings.get("stages") or build_default_stages(members, settings.get("chairman_id"))
     stages_output: List[Dict[str, Any]] = []
@@ -554,6 +607,7 @@ async def run_full_council(
                 stage_prompt=stage_prompt,
                 execution_mode=execution_mode,
                 stage_members=stage_members if stage_members else None,
+                conversation_history=history_text,
             )
             aggregate_rankings = calculate_aggregate_rankings(rankings_results, label_to_model)
             metadata["label_to_model"] = label_to_model
@@ -572,6 +626,7 @@ async def run_full_council(
                 api_key=api_key,
                 stage_prompt=stage_prompt,
                 stage_members=stage_members if stage_members else None,
+                conversation_history=history_text,
             )
             stage_entry.update({"results": synthesis_result})
         else:
@@ -586,6 +641,7 @@ async def run_full_council(
                 prior_results=last_responses,
                 responses_context=last_responses,
                 rankings_context=last_rankings,
+                conversation_history=history_text,
             )
             last_responses = responses_results
             stage_entry.update({"results": responses_results})

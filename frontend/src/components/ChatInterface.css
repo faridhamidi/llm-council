@@ -61,7 +61,7 @@
 
 .empty-state p {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: var(--text-secondary);
   max-width: 460px;
 }
@@ -77,7 +77,7 @@
 }
 
 .message-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-tertiary);
   margin-bottom: 0;
@@ -103,7 +103,7 @@
   border: 1px solid rgba(62, 207, 142, 0.35);
   background: rgba(62, 207, 142, 0.12);
   color: var(--accent-green-light);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -175,7 +175,7 @@
   border: 1px solid rgba(239, 68, 68, 0.4);
   background: rgba(239, 68, 68, 0.15);
   color: #fca5a5;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -189,7 +189,7 @@
 .message-counter {
   width: 100%;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   padding: 6px 0;
   margin-bottom: 8px;
@@ -222,7 +222,7 @@
   gap: 12px;
   padding: 14px 16px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   border-radius: 10px;
   border: 1px dashed var(--border-primary);
   background: rgba(18, 20, 23, 0.5);
@@ -235,7 +235,7 @@
   border: 1px solid var(--border-primary);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -255,7 +255,7 @@
   border-radius: 10px;
   border: 1px solid var(--border-primary);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   font-style: italic;
 }
 
@@ -291,12 +291,13 @@
   border: 1px solid var(--border-primary);
   border-radius: 12px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-family: inherit;
   line-height: 1.5;
   outline: none;
   resize: vertical;
-  min-height: 80px;
+  min-height: 104px;
+  /* Force height to match button stack (48+48+8) */
   max-height: 300px;
 }
 
@@ -317,7 +318,7 @@
   border: 1px solid var(--accent-green);
   border-radius: 12px;
   color: #06130d;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -334,6 +335,47 @@
   opacity: 0.5;
   cursor: not-allowed;
   background: var(--border-primary);
+  border-color: var(--border-primary);
+  color: var(--text-tertiary);
+}
+
+.input-wrapper {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.input-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.reconvene-button {
+  padding: 12px 24px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 12px;
+  color: #a5b4fc;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.reconvene-button:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: #6366f1;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+  color: #fff;
+}
+
+.reconvene-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--bg-secondary);
   border-color: var(--border-primary);
   color: var(--text-tertiary);
 }
@@ -381,7 +423,7 @@
 
   .user-message .message-content {
     padding: 12px;
-    font-size: 13px;
+    font-size: var(--font-size-small);
   }
 
   .assistant-message {
@@ -390,7 +432,7 @@
 
   .loading-indicator,
   .stage-loading {
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .input-form {
@@ -403,13 +445,13 @@
 
   .message-input {
     padding: 12px;
-    font-size: 13px;
+    font-size: var(--font-size-small);
     min-height: 64px;
   }
 
   .send-button {
     padding: 10px 18px;
-    font-size: 13px;
+    font-size: var(--font-size-small);
   }
 }
 
@@ -434,7 +476,7 @@
   padding: 12px;
   background: rgba(59, 130, 246, 0.15);
   color: #93c5fd;
-  font-size: 13px;
+  font-size: var(--font-size-small);
   font-weight: 600;
   letter-spacing: 0.5px;
   border-bottom: 1px solid rgba(59, 130, 246, 0.2);
@@ -442,7 +484,7 @@
 }
 
 .paused-icon {
-  font-size: 16px;
+  font-size: var(--font-size-h3);
 }
 
 .input-form.paused-form {

@@ -108,6 +108,16 @@ function App() {
       const conv = await api.getConversation(id);
       conversationCacheRef.current[id] = conv;
       setCurrentConversation(conv);
+
+      // Also fetch conversation info to get remaining messages count
+      try {
+        const info = await api.getConversationInfo(id);
+        if (info && info.remaining_messages !== undefined) {
+          setRemainingMessages(info.remaining_messages);
+        }
+      } catch (infoError) {
+        console.error('Failed to load conversation info:', infoError);
+      }
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
@@ -285,7 +295,7 @@ function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, forceCouncil = false) => {
     if (!currentConversationId) return;
 
     const targetConversationId = currentConversationId;
@@ -385,7 +395,7 @@ function App() {
               console.log('Unknown event type:', eventType);
           }
         },
-        { signal: controller.signal }
+        { signal: controller.signal, forceCouncil }
       );
     } catch (error) {
       if (error.name === 'AbortError') {

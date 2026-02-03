@@ -10,7 +10,7 @@
 .stage-title {
   margin: 0 0 16px 0;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
@@ -22,7 +22,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -41,7 +41,7 @@
   border-radius: 10px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-small);
   transition: all 0.2s ease;
 }
 
@@ -82,7 +82,7 @@
 
 .model-name {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   font-family: var(--font-mono);
   margin: 0;
 }
@@ -93,7 +93,7 @@
   border: 1px solid rgba(62, 207, 142, 0.4);
   background: rgba(62, 207, 142, 0.12);
   color: var(--accent-green-light);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -111,7 +111,7 @@
   background: rgba(245, 158, 11, 0.15);
   border: 1px solid rgba(245, 158, 11, 0.4);
   color: #fde68a;
-  font-size: 12px;
+  font-size: var(--font-size-small);
 }
 
 .response-text {
@@ -131,7 +131,7 @@
   }
 
   .stage-title {
-    font-size: 14px;
+    font-size: var(--font-size-body);
     margin-bottom: 12px;
   }
 
@@ -141,7 +141,7 @@
 
   .tab {
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-small);
   }
 
   .tab-content {
@@ -149,14 +149,14 @@
   }
 
   .model-name {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .copy-stage-btn {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .response-text {
-    font-size: 13px;
+    font-size: var(--font-size-small);
   }
 }

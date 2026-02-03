@@ -224,13 +224,13 @@ export const api = {
   /**
    * Send a message in a conversation.
    */
-  async sendMessage(conversationId, content) {
+  async sendMessage(conversationId, content, forceCouncil = false) {
     const response = await apiFetch(`/api/conversations/${conversationId}/message`, {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
       }),
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, force_council: forceCouncil }),
     });
     if (!response.ok) {
       throw new Error('Failed to send message');
@@ -292,14 +292,15 @@ export const api = {
    * @returns {Promise<void>}
    */
   async sendMessageStream(conversationId, content, onEvent, options = {}) {
-    const { signal } = options;
+    const { signal, forceCouncil = false } = options;
+    console.log('API sendMessageStream:', { conversationId, forceCouncil });
     const response = await apiFetch(`/api/conversations/${conversationId}/message/stream`, {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
       }),
       signal,
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, force_council: forceCouncil }),
     });
 
     if (!response.ok) {

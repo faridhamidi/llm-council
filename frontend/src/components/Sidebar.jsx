@@ -31,6 +31,7 @@ export default function Sidebar({
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [presetNameInput, setPresetNameInput] = useState('');
   const [presetStatus, setPresetStatus] = useState(null);
+  const [speakerModelId, setSpeakerModelId] = useState('');
 
   const buildDefaultStages = (members, chairmanId) => {
     const memberIds = members.map((member) => member.id);
@@ -195,7 +196,29 @@ export default function Sidebar({
       ]);
       const models = modelsResponse.models || [];
       setCouncilModels(models);
-      setCouncilSettings(coerceCouncilSettings(settingsResponse, models));
+
+      const coerced = coerceCouncilSettings(settingsResponse, models);
+
+      // Extract Chairman
+      const chairmanId = coerced.chairman_id;
+      const chairmanMember = coerced.members.find(m => m.id === chairmanId);
+      const visibleMembers = coerced.members.filter(m => m.id !== chairmanId);
+
+      // Extract Speaker Model
+      const initialSpeakerModel = chairmanMember ? chairmanMember.model_id : (models[0]?.id || '');
+      setSpeakerModelId(initialSpeakerModel);
+
+      // Filter Stages (hide Final Synthesis)
+      const visibleStages = (coerced.stages || []).filter(s =>
+        s.id !== 'stage-3' && s.name !== 'Final Synthesis'
+      );
+
+      setCouncilSettings({
+        ...coerced,
+        members: visibleMembers,
+        stages: visibleStages
+      });
+
       setCouncilPresets(presetsResponse.presets || []);
     } catch (error) {
       setCouncilError(error.message || 'Failed to load council settings.');
@@ -243,10 +266,16 @@ export default function Sidebar({
   const handleAddMemberToStage = (stageId) => {
     setCouncilSettings((prev) => {
       if (!prev) return prev;
-      const maxMembers = prev.max_members || 7;
+      const maxMembers = prev.max_members || 64;
       if (prev.members.length >= maxMembers) return prev;
       const stage = (prev.stages || []).find((s) => s.id === stageId);
-      if (!stage || stage.member_ids.length >= 5) return prev;
+      if (!stage) return prev;
+
+      // VALIDATION FIX: Filter out ghost members to get true count
+      const validMemberIds = stage.member_ids.filter(mid => prev.members.some(m => m.id === mid));
+
+      if (validMemberIds.length >= 6) return prev;
+
       const newId = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `member-${Date.now()}`;
@@ -258,9 +287,10 @@ export default function Sidebar({
         system_prompt: '',
       };
       const nextMembers = [...prev.members, newMember];
+      // We use the CLEANED validMemberIds list when appending, effectively healing the stage
       const nextStages = (prev.stages || []).map((s) =>
         s.id === stageId
-          ? { ...s, member_ids: [...s.member_ids, newId] }
+          ? { ...s, member_ids: [...validMemberIds, newId] }
           : s
       );
       return { ...prev, members: nextMembers, stages: nextStages };
@@ -289,9 +319,11 @@ export default function Sidebar({
       if (!prev) return prev;
       const nextStages = (prev.stages || []).map((stage) => {
         if (stage.id !== stageId) return stage;
+        // Also clean ghosts while we are at it
+        const validMemberIds = stage.member_ids.filter(mid => prev.members.some(m => m.id === mid));
         return {
           ...stage,
-          member_ids: stage.member_ids.filter((id) => id !== memberId),
+          member_ids: validMemberIds.filter((id) => id !== memberId),
         };
       });
       return { ...prev, stages: nextStages };
@@ -363,6 +395,18 @@ export default function Sidebar({
 
       // Moving between different stages
       if (draggedMember.stageId === targetStageId) return prev;
+
+      // 1. Pre-check target stage capacity
+      const targetStage = (prev.stages || []).find(s => s.id === targetStageId);
+      if (!targetStage) return prev;
+
+      const validTargetMembers = targetStage.member_ids.filter(mid => prev.members.some(m => m.id === mid));
+      if (validTargetMembers.length >= 6) {
+        // Target is full, abort operation to prevent data loss (member staying in source)
+        return prev;
+      }
+
+      // 2. Perform the move
       const nextStages = (prev.stages || []).map((stage) => {
         if (stage.id === draggedMember.stageId) {
           return {
@@ -371,15 +415,13 @@ export default function Sidebar({
           };
         }
         if (stage.id === targetStageId) {
-          if (stage.member_ids.length >= 5) {
-            return stage;
-          }
           if (stage.member_ids.includes(draggedMember.memberId)) {
             return stage;
           }
+          // Use cleaned list from pre-check + new member
           return {
             ...stage,
-            member_ids: [...stage.member_ids, draggedMember.memberId],
+            member_ids: [...validTargetMembers, draggedMember.memberId],
           };
         }
         return stage;
@@ -423,23 +465,55 @@ export default function Sidebar({
     setIsCouncilSaving(true);
     setCouncilError(null);
     try {
-      const nextSettings = coerceCouncilSettings(councilSettings, councilModels);
-      if (nextSettings !== councilSettings) {
-        setCouncilSettings(nextSettings);
+      // Re-construct settings with hidden Chairman and Final Synthesis
+      const nextSettingsBase = coerceCouncilSettings(councilSettings, councilModels);
+
+      const visibleMembers = nextSettingsBase.members;
+      const visibleMemberIds = new Set(visibleMembers.map((member) => member.id));
+      let chairmanId = nextSettingsBase.chairman_id || 'chairman-fixed';
+      if (visibleMemberIds.has(chairmanId)) {
+        const fallbackId = typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `chairman-${Date.now()}`;
+        chairmanId = visibleMemberIds.has('chairman-fixed') ? fallbackId : 'chairman-fixed';
       }
-      const payload = {
-        members: nextSettings.members,
-        chairman_id: nextSettings.chairman_id,
-        chairman_label: nextSettings.chairman_label || 'Chairman',
-        title_model_id: nextSettings.title_model_id,
-        use_system_prompt_stage2: nextSettings.use_system_prompt_stage2 ?? true,
-        use_system_prompt_stage3: nextSettings.use_system_prompt_stage3 ?? true,
-        stages: nextSettings.stages || [],
-        // Chairman handles follow-ups (context level still configurable)
-        speaker_context_level: nextSettings.speaker_context_level || 'full',
+
+      const chairmanMember = {
+        id: chairmanId,
+        alias: nextSettingsBase.chairman_label || 'Chairman',
+        model_id: speakerModelId,
+        system_prompt: '',
       };
+
+      const allMembers = [...visibleMembers, chairmanMember];
+
+      // Re-construct Stages
+      const synthesisStage = {
+        id: 'stage-3',
+        name: 'Final Synthesis',
+        prompt: '',
+        execution_mode: 'sequential',
+        member_ids: [chairmanId]
+      };
+
+      const allStages = [...(nextSettingsBase.stages || []), synthesisStage];
+
+      const payload = {
+        members: allMembers,
+        chairman_id: chairmanId,
+        chairman_label: nextSettingsBase.chairman_label || 'Chairman',
+        title_model_id: nextSettingsBase.title_model_id,
+        use_system_prompt_stage2: nextSettingsBase.use_system_prompt_stage2 ?? true,
+        use_system_prompt_stage3: nextSettingsBase.use_system_prompt_stage3 ?? true,
+        stages: allStages,
+        speaker_context_level: nextSettingsBase.speaker_context_level || 'full',
+      };
+
       await api.updateCouncilSettings(payload);
-      setCouncilSettings((prev) => (prev ? { ...prev, ...payload } : prev));
+
+      // Update local state is tricky because we want to keep the UI "clean"
+      // We essentially just keep the current visible state, but we might want to reload to be safe.
+      // But for smooth UX, let's just close modal.
       setIsCouncilModalOpen(false);
     } catch (error) {
       setCouncilError(error.message || 'Failed to update council settings.');
@@ -909,7 +983,10 @@ export default function Sidebar({
                         {(!stage.type || stage.type === 'ai') ? (
                           <div className="stage-members-section">
                             <div className="stage-members-header">
-                              <span className="member-label">Members ({stage.member_ids.length} / 5)</span>
+                              {/* Calculate valid count for display */}
+                              <span className="member-label">
+                                Members ({stage.member_ids.filter(mid => councilSettings.members.some(m => m.id === mid)).length} / 6)
+                              </span>
                             </div>
                             <div
                               className="stage-members-grid"
@@ -999,38 +1076,71 @@ export default function Sidebar({
                                       }
                                       placeholder="System prompt (optional)..."
                                     />
-                                    {/* Chairman button only shows in the final stage */}
-                                    {stageIndex === (councilSettings.stages || []).length - 1 && (
-                                      <button
-                                        className={`chairman-btn-inline ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
-                                        onClick={() =>
-                                          setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
-                                        }
-                                        title={councilSettings.chairman_id === member.id ? 'Chairman (consolidates & handles follow-ups)' : 'Set as Chairman'}
-                                      >
-                                        {councilSettings.chairman_id === member.id ? '★ Chairman' : 'Set Chairman'}
-                                      </button>
-                                    )}
+                                    {/* Chairman button removed */}
                                   </div>
                                 );
                               })}
-                              <button
-                                className="add-member-btn-inline"
-                                onClick={() => handleAddMemberToStage(stage.id)}
-                                disabled={
-                                  stage.member_ids.length >= 5 ||
-                                  councilSettings.members.length >= (councilSettings.max_members || 7)
-                                }
-                                title="Add member to this stage"
-                              >
-                                <span className="add-icon-inline">+</span>
-                                <span>Add Member</span>
-                              </button>
+
+                              {/* Only show add button if we haven't reached the limit of 6 */
+                                stage.member_ids.filter(mid => councilSettings.members.some(m => m.id === mid)).length < 6 && (
+                                  <button
+                                    className="add-member-btn-inline"
+                                    onClick={() => handleAddMemberToStage(stage.id)}
+                                    disabled={
+                                      councilSettings.members.length >= (councilSettings.max_members || 64)
+                                    }
+                                    title="Add member to this stage"
+                                  >
+                                    <span className="add-icon-inline">+</span>
+                                    <span>Add Member</span>
+                                  </button>
+                                )}
                             </div>
                           </div>
                         ) : null}
                       </div>
                     ))}
+                    {/* Static Final Synthesis Stage */}
+                    <div className="stage-card-row static-stage">
+                      <div className="stage-row-header">
+                        <div className="stage-header-left">
+                          <div className="stage-kicker">Final Stage</div>
+                          <div className="stage-name-static">Final Synthesis (by Speaker)</div>
+                        </div>
+                        <div className="stage-header-controls">
+                          <span className="static-badge">System</span>
+                        </div>
+                      </div>
+                      <div className="stage-members-section">
+                        <div className="stage-members-header">
+                          <span className="member-label">Speaker Configuration</span>
+                        </div>
+                        <div className="stage-members-grid" style={{ gridTemplateColumns: '1fr', borderStyle: 'solid', borderColor: 'var(--accent-teal)' }}>
+                          <div className="member-card-inline" style={{ borderColor: 'transparent', boxShadow: 'none', background: 'transparent', padding: 0 }}>
+                            <div className="member-card-inline-header">
+                              <div className="member-alias-inline" style={{ background: 'transparent', border: 'none', paddingLeft: 0, fontWeight: 700, fontSize: '15px' }}>
+                                Council Speaker / Chairman
+                              </div>
+                            </div>
+                            <select
+                              className="member-model-inline"
+                              value={speakerModelId}
+                              onChange={(event) => setSpeakerModelId(event.target.value)}
+                              style={{ borderColor: 'var(--accent-teal)' }}
+                            >
+                              {councilModels.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.label}
+                                </option>
+                              ))}
+                            </select>
+                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                              The Speaker synthesizes the final answer and handles follow-up questions.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div className="members-grid" style={{ display: 'none' }}>
                     {councilSettings.members.map((member, index) => (
@@ -1083,14 +1193,7 @@ export default function Sidebar({
                           }
                           placeholder="Add role-specific guidance for this member..."
                         />
-                        <button
-                          className={`chairman-btn ${councilSettings.chairman_id === member.id ? 'active' : ''}`}
-                          onClick={() =>
-                            setCouncilSettings((prev) => ({ ...prev, chairman_id: member.id }))
-                          }
-                        >
-                          {councilSettings.chairman_id === member.id ? 'Chairman' : 'Set as Chairman'}
-                        </button>
+                        {/* Chairman button removed */}
                       </div>
                     ))}
                     <button

@@ -75,6 +75,23 @@
   --duration-base: 220ms;
   --duration-slow: 360ms;
 
+  /* Typography Scale */
+  --font-size-display: 32px;
+  --font-size-h1: 24px;
+  --font-size-h2: 20px;
+  --font-size-h3: 18px;
+  --font-size-body: 15px;
+  --font-size-small: 13px;
+  --font-size-xs: 11px;
+  /* Retaining for very small labels/metadata */
+
+  --line-height-display: 40px;
+  --line-height-h1: 32px;
+  --line-height-h2: 28px;
+  --line-height-h3: 26px;
+  --line-height-body: 24px;
+  --line-height-small: 20px;
+
   font-family: var(--font-sans);
   line-height: 1.6;
   font-weight: 400;

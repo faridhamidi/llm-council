@@ -185,7 +185,7 @@ export default function ChatInterface({
 
   // Calculate message counter display
   const hasMessages = conversation?.messages?.length > 0;
-  const messageCounter = remainingMessages !== undefined && hasMessages ? (
+  const messageCounter = remainingMessages !== undefined && remainingMessages !== null && hasMessages ? (
     <div className={`message-counter ${remainingMessages <= 5 ? 'warning' : ''} ${remainingMessages === 0 ? 'limit-reached' : ''}`}>
       {remainingMessages === 0
         ? "Message limit reached. Start a new conversation."
@@ -292,22 +292,41 @@ export default function ChatInterface({
       {hasMessages && remainingMessages !== 0 && !isPaused && (
         <form className="input-form follow-up" onSubmit={handleSubmit}>
           {messageCounter}
-          <textarea
-            className="message-input"
-            placeholder="Ask a follow-up question..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || remainingMessages === 0}
-            rows={2}
-          />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading || remainingMessages === 0}
-          >
-            Send
-          </button>
+          <div className="input-wrapper">
+            <textarea
+              className="message-input"
+              placeholder="Ask a follow-up question..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading || remainingMessages === 0}
+              rows={2}
+            />
+          </div>
+          <div className="input-actions">
+            <button
+              type="button"
+              className="reconvene-button"
+              title="Force the full council to reconvene and deliberate on this question."
+              disabled={!input.trim() || isLoading || remainingMessages === 0}
+              onClick={() => {
+                if (input.trim() && !isLoading) {
+                  onSendMessage(input, true); // Force Council
+                  setInput('');
+                }
+              }}
+            >
+              Ask Council
+            </button>
+            <button
+              type="submit"
+              className="send-button"
+              disabled={!input.trim() || isLoading || remainingMessages === 0}
+              title="Ask the Council Speaker (faster)"
+            >
+              Ask Speaker
+            </button>
+          </div>
         </form>
       )}
 

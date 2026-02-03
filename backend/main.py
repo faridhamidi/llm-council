@@ -149,6 +149,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    force_council: bool = False
 
 
 class UpdateBedrockTokenRequest(BaseModel):
@@ -343,22 +344,33 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     # Add user message
     storage.add_user_message(conversation_id, payload.content, token_count=user_token_count)
 
-    if is_first_message:
-        # First message: Run full council process
+    # Refresh conversation to get the message we just added (for context)
+    conversation = storage.get_conversation(conversation_id)
+    messages = conversation.get("messages", [])
+
+    if is_first_message or payload.force_council:
+        # Run full council process (either first run or manual reconvene)
         
-        # Generate title in parallel
-        title = await generate_conversation_title(payload.content, api_key=bedrock_key)
-        storage.update_conversation_title(conversation_id, title)
+        # Generate title in parallel if first message
+        if is_first_message:
+            title = await generate_conversation_title(payload.content, api_key=bedrock_key)
+            storage.update_conversation_title(conversation_id, title)
+            # Use current settings
+            settings = get_settings()
+            storage.save_settings_snapshot(conversation_id, settings)
+        else:
+            # For reconvene, use existing snapshot or fallback
+            settings = conversation.get("settings_snapshot") or get_settings()
 
-        # Snapshot current settings for this conversation
-        current_settings = get_settings()
-        storage.save_settings_snapshot(conversation_id, current_settings)
-
-        # Run the council pipeline
+        # Run the council pipeline with HISTORY
         stages, metadata = await run_full_council(
             payload.content,
             api_key=bedrock_key,
-            settings=current_settings,
+            settings=settings,
+            conversation_messages=messages[:-1] if not is_first_message else None # Exclude the very last message if it's the trigger? 
+            # Actually, standard is to include history UP TO the current prompt. 
+            # The prompt IS the user's last message.
+            # So history should be everything BEFORE the last message.
         )
 
         final_result = get_final_response(stages)
@@ -387,8 +399,8 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     else:
         # Follow-up message: Use council speaker
         
-        
-        # Count user messages to check limit (exclude the one we just added)
+        # Count user messages to check limit (exclude the one we just added?)
+        # Wait, the logic before was calculating limit based on EXISTING messages.
         user_message_count = sum(1 for msg in conversation["messages"] if msg.get("role") == "user")
         
         # Calculate dynamic limit based on council outputs
@@ -401,19 +413,16 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         if used_followups >= dynamic_limit:
             raise HTTPException(
                 status_code=400,
-                detail=f"Message limit reached. Maximum {dynamic_limit} follow-up messages allowed for this conversation."
+                detail=f"Message limit reached. Maximum {dynamic_limit} follow-up messages allowed for this conversation. You can trigger a full council reconvene to reset."
             )
         
         # Get settings snapshot (or current settings as fallback)
         settings = conversation.get("settings_snapshot") or get_settings()
         
-        # Refresh conversation to include the new user message
-        conversation = storage.get_conversation(conversation_id)
-        
         # Query the council speaker
         speaker_response = await query_council_speaker(
             payload.content,
-            conversation["messages"],
+            conversation["messages"], # This includes the new user message
             settings,
             api_key=bedrock_key,
         )
@@ -425,21 +434,20 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             token_count=speaker_response.get("token_count", 0),
         )
         
-        # Calculate remaining messages
-        # Calculate remaining messages
-        # Re-calc limit in case it changed (it shouldn't have, but good to be safe)
-        council_outputs = calculate_council_output_count(conversation["messages"])
-        dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
-        
-        # user_message_count was calculated BEFORE adding current message, so add 1 to get current count
-        current_user_count = user_message_count + 1
-        used_followups = max(0, current_user_count - 1)
-        
-        remaining = max(0, dynamic_limit - used_followups)
-        
         # Refresh conversation to get updated token count
         updated_conversation = storage.get_conversation(conversation_id)
         
+        # Re-calc limit for UI
+        council_outputs = calculate_council_output_count(conversation["messages"])
+        dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
+        
+        # Recalculate remaining
+        # conversation["messages"] has the new user message + new speaker message (not yet? no storage.get is before add_speaker)
+        # updated_conversation has both.
+        user_message_count = sum(1 for msg in updated_conversation["messages"] if msg.get("role") == "user")
+        used_followups = max(0, user_message_count - 1) # Approximate
+        remaining = max(0, dynamic_limit - used_followups)
+
         return {
             "message_type": "speaker",
             "model": speaker_response.get("model"),
@@ -497,10 +505,23 @@ async def retry_message(conversation_id: str, http_request: Request):
     
     if user_message_count == 1:
         # This was the first message - retry full council
+        # This was the first message - retry full council
+        # We need to construct history. Since we deleted the last assistant message,
+        # the history is everything in 'messages' up to the last user message.
+        # But wait, 'messages' here comes from storage BEFORE deletion?
+        # No, we called storage.delete_last_assistant_message.
+        # So we should re-fetch conversation.
+        updated_conv = storage.get_conversation(conversation_id)
+        current_messages = updated_conv.get("messages", [])
+        
+        # We need to exclude the very last user message (the one being retried) from history
+        history = current_messages[:-1] if current_messages else []
+
         stages, metadata = await run_full_council(
             last_user_msg.get("content", ""),
             api_key=bedrock_key,
             settings=settings,
+            conversation_messages=history,
         )
 
         final_result = get_final_response(stages)
@@ -671,8 +692,9 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
     aliases = [member.alias.strip() for member in members]
     if len(set(ids)) != len(ids):
         errors.append("Member IDs must be unique.")
-    if len(set(a.lower() for a in aliases)) != len(aliases):
-        errors.append("Member aliases must be unique.")
+    # DECOUPLED: Aliases are no longer required to be globally unique since members are scoped to stages
+    # if len(set(a.lower() for a in aliases)) != len(aliases):
+    #     errors.append("Member aliases must be unique.")
     if any(not alias for alias in aliases):
         errors.append("Member aliases cannot be empty.")
 
@@ -786,6 +808,7 @@ async def apply_council_preset(request: CouncilPresetApplyRequest):
     
     # Regenerate IDs to ensure uniqueness and unlink from preset defaults
     settings = regenerate_settings_ids(settings)
+    settings["max_members"] = MAX_COUNCIL_MEMBERS
 
     try:
         payload = CouncilSettingsRequest.model_validate(settings)
@@ -814,6 +837,7 @@ async def delete_council_preset(preset_id: str):
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest, http_request: Request):
+    print(f"DEBUG STREAM: content='{request.content[:20]}...', force_council={request.force_council}")
     """
     Send a message and stream the council process.
     Returns Server-Sent Events as each stage completes.
@@ -843,13 +867,19 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
             user_token_count = estimate_token_count(request.content)
             storage.add_user_message(conversation_id, request.content, token_count=user_token_count)
 
-            if is_first_message:
-                # Snapshot current settings for this conversation
-                current_settings = get_settings()
-                storage.save_settings_snapshot(conversation_id, current_settings)
-
-                # Start title generation in parallel (don't await yet)
-                title_task = asyncio.create_task(generate_conversation_title(request.content, api_key=bedrock_key))
+            if is_first_message or request.force_council:
+                # Snapshot current settings for this conversation (if first message)
+                # or use existing snapshot (if reconvene)
+                if is_first_message:
+                    current_settings = get_settings()
+                    storage.save_settings_snapshot(conversation_id, current_settings)
+                    
+                    # Start title generation in parallel (don't await yet)
+                    title_task = asyncio.create_task(generate_conversation_title(request.content, api_key=bedrock_key))
+                else:
+                    conversation_snapshot = storage.get_conversation(conversation_id) or {}
+                    current_settings = conversation_snapshot.get("settings_snapshot") or get_settings()
+                    title_task = None # No title generation for reconvene? Or maybe we should? Probably not needed.
 
                 async def on_stage_start(stage_entry: Dict[str, Any]) -> None:
                     if cancel_event.is_set():
@@ -861,18 +891,28 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     if cancel_event.is_set():
                         raise asyncio.CancelledError()
 
+                # Get history for reconvening
+                conversation_snapshot = storage.get_conversation(conversation_id) or {}
+                messages = conversation_snapshot.get("messages", [])
+                # The user message was JUST added. So history is everything up to the user message.
+                # messages includes the new user message at the end.
+                # So we pass messages[:-1] as history.
+                history = messages[:-1] if not is_first_message else None
+
                 stages, _ = await run_full_council(
                     request.content,
                     api_key=bedrock_key,
                     settings=current_settings,
                     on_stage_start=on_stage_start,
                     on_stage_complete=on_stage_complete,
+                    conversation_messages=history,
                 )
 
-                # Wait for title generation
-                title = await title_task
-                storage.update_conversation_title(conversation_id, title)
-                await event_queue.put({"type": "title_complete", "data": {"title": title}})
+                # Wait for title generation if it exists
+                if title_task:
+                    title = await title_task
+                    storage.update_conversation_title(conversation_id, title)
+                    await event_queue.put({"type": "title_complete", "data": {"title": title}})
 
                 final_result = get_final_response(stages)
                 response_tokens = estimate_token_count(str(final_result.get("response", "")))

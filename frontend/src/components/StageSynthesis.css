@@ -10,7 +10,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -33,7 +33,7 @@
 
 .chairman-label {
   color: var(--accent-green-light);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   font-family: var(--font-mono);
   font-weight: 600;
 }
@@ -44,7 +44,7 @@
   border: 1px solid rgba(16, 185, 129, 0.4);
   background: rgba(16, 185, 129, 0.15);
   color: var(--accent-green-light);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -58,7 +58,7 @@
 .final-text {
   color: var(--text-secondary);
   line-height: 1.7;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -76,6 +76,6 @@
   }
 
   .final-text {
-    font-size: 13px;
+    font-size: var(--font-size-small);
   }
 }
