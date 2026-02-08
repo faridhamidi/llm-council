@@ -276,13 +276,22 @@ function App() {
     }
   };
 
-  const handleNewConversation = async () => {
+  const handleNewConversation = async (mode = 'council') => {
     try {
-      const newConv = await api.createConversation();
+      const newConv = await api.createConversation(mode);
       setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
+        {
+          id: newConv.id,
+          created_at: newConv.created_at,
+          title: newConv.title,
+          mode: newConv.mode || mode,
+          message_count: 0,
+        },
         ...conversations,
       ]);
+      conversationCacheRef.current[newConv.id] = newConv;
+      setCurrentConversation(newConv);
+      setRemainingMessages(mode === 'chat' ? 50 : null);
       setCurrentConversationId(newConv.id);
       setIsSidebarOpen(false);
     } catch (error) {
@@ -299,17 +308,28 @@ function App() {
     if (!currentConversationId) return;
 
     const targetConversationId = currentConversationId;
+    const targetConversation = conversationCacheRef.current[targetConversationId]
+      || (currentConversationIdRef.current === targetConversationId ? currentConversationRef.current : null);
+    const conversationMode = targetConversation?.mode || 'council';
     setStreamingConversationId(targetConversationId);
     const controller = new AbortController();
     setStreamController(controller);
     try {
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
-      const assistantMessage = {
-        role: 'assistant',
-        message_type: 'council',
-        stages: [],
-      };
+      const assistantMessage = conversationMode === 'chat'
+        ? {
+          role: 'assistant',
+          message_type: 'speaker',
+          model: 'Assistant',
+          response: '',
+          speaker_response: '',
+        }
+        : {
+          role: 'assistant',
+          message_type: 'council',
+          stages: [],
+        };
       updateConversationById(targetConversationId, (prev) => ({
         ...prev,
         messages: [...prev.messages, userMessage, assistantMessage],
@@ -369,6 +389,13 @@ function App() {
             case 'complete':
               // Stream complete, reload conversations list
               loadConversations();
+              api.getConversationInfo(targetConversationId)
+                .then((info) => {
+                  if (info && info.remaining_messages !== undefined) {
+                    setRemainingMessages(info.remaining_messages);
+                  }
+                })
+                .catch(() => { });
               setStreamController(null);
               setStreamingConversationId(null);
               break;
@@ -410,9 +437,7 @@ function App() {
       } else {
         console.error('Failed to send message:', error);
         // Remove optimistic messages on error
-        const errorMessage = error.message === 'Bedrock key not set for this session.' || error.message.includes('Bedrock key not set')
-          ? 'Error: Bedrock API key is missing. Please add it in settings.'
-          : `Error: ${error.message}`;
+        const errorMessage = `Error: ${error.message}`;
 
         updateConversationById(targetConversationId, (prev) => {
           const messages = [...prev.messages];

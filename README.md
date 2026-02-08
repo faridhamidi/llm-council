@@ -75,16 +75,31 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### 2. Configure AWS SSO + Region (recommended)
 
-Create a `.env` file in the project root:
+Authenticate in terminal before starting the app:
+
+```bash
+aws configure sso --profile <your-profile>
+aws sso login --profile <your-profile>
+export AWS_PROFILE=<your-profile>
+export AWS_REGION=us-east-2
+```
+
+Then start/restart the app. The backend uses AWS SDK credentials (including SSO) by default.
+
+If your SSO session expires, run `aws sso login --profile <your-profile>` again and retry.
+
+#### Hidden fallback (advanced/manual)
+
+Bearer token auth still exists as a non-UI fallback:
 
 ```bash
 BEDROCK_API_KEY=bedrock-api-key-...
-AWS_REGION=ap-southeast-1
+# or
+AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-...
 ```
 
-You can also use `AWS_BEARER_TOKEN_BEDROCK` instead of `BEDROCK_API_KEY` if you prefer the AWS env var name.
 Note: Ensure your `AWS_REGION` supports the Bedrock Inference Profiles you intend to use.
 
 ### 3. Run the Application

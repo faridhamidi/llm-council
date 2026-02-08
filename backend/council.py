@@ -809,6 +809,114 @@ def _build_speaker_context(
     return "\n\n".join(context_parts)
 
 
+def _resolve_chairman_member(settings: Dict[str, Any]) -> Dict[str, Any] | None:
+    members = settings.get("members", [])
+    chairman_id = settings.get("chairman_id")
+    for member in members:
+        if member.get("id") == chairman_id:
+            return member
+    if members:
+        return members[0]
+    return None
+
+
+def _build_chat_history_messages(conversation_messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    messages: List[Dict[str, str]] = []
+    for msg in conversation_messages:
+        role = msg.get("role")
+        if role == "user":
+            content = (msg.get("content") or "").strip()
+            if content:
+                messages.append({"role": "user", "content": content})
+            continue
+
+        if role != "assistant":
+            continue
+
+        message_type = msg.get("message_type", "speaker")
+        if message_type == "speaker":
+            content = (msg.get("response") or msg.get("speaker_response") or "").strip()
+            if content:
+                messages.append({"role": "assistant", "content": content})
+            continue
+
+        stages = msg.get("stages") or []
+        final = get_final_response(stages)
+        content = (final.get("response") or "").strip()
+        if content:
+            messages.append({"role": "assistant", "content": content})
+    return messages
+
+
+async def query_normal_chat(
+    user_query: str,
+    conversation_messages: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    api_key: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Query a single model for normal chat mode (no council pipeline).
+    """
+    chairman_member = _resolve_chairman_member(settings)
+    if not chairman_member:
+        return {
+            "model": "Error",
+            "response": "No chat model configured.",
+            "token_count": 0,
+            "error": True,
+        }
+
+    model_id = chairman_member.get("model_id", "")
+    model_label = chairman_member.get("alias", "Assistant")
+    system_prompt = chairman_member.get("system_prompt", "") or None
+
+    messages = _build_chat_history_messages(conversation_messages)
+
+    # Ensure the latest user query is present even if caller passed stale history.
+    if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_query:
+        messages.append({"role": "user", "content": user_query})
+
+    response = await query_model(
+        model_id,
+        messages,
+        system_prompt=system_prompt,
+        api_key=api_key,
+    )
+
+    if response is None:
+        return {
+            "model": model_label,
+            "response": "Error: Unable to generate response. Please try again.",
+            "token_count": 0,
+            "error": True,
+        }
+
+    if response.get("error"):
+        return {
+            "model": model_label,
+            "response": f"Bedrock Error: {response.get('error')}",
+            "token_count": 0,
+            "error": True,
+        }
+
+    text = (response.get("content") or "").strip()
+    if not text:
+        return {
+            "model": model_label,
+            "response": "Error: Empty response from model. Please try again.",
+            "token_count": 0,
+            "error": True,
+        }
+
+    history_chars = sum(len(m.get("content", "")) for m in messages)
+    return {
+        "model": model_label,
+        "response": text,
+        "token_count": estimate_token_count(text) + (history_chars // 20),
+        "error": False,
+    }
+
+
 async def query_council_speaker(
     user_query: str,
     conversation_messages: List[Dict[str, Any]],
@@ -879,12 +987,29 @@ Provide a helpful, accurate response:"""
             system_prompt=chairman_system_prompt if chairman_system_prompt else None,
             api_key=api_key,
         )
-        
-        if response is None or not response.get("content"):
+
+        if response is None:
             return {
                 "model": chairman_label,
                 "response": "Error: Unable to generate response. Please try again.",
                 "token_count": 0,
+                "error": True,
+            }
+
+        if response.get("error"):
+            return {
+                "model": chairman_label,
+                "response": f"Bedrock Error: {response.get('error')}",
+                "token_count": 0,
+                "error": True,
+            }
+
+        if not response.get("content"):
+            return {
+                "model": chairman_label,
+                "response": "Error: Unable to generate response. Please try again.",
+                "token_count": 0,
+                "error": True,
             }
         
         response_text = response.get("content", "")
@@ -899,10 +1024,10 @@ Provide a helpful, accurate response:"""
     except Exception as e:
         error_msg = str(e)
         # Check for specific API errors
-        if "expired" in error_msg.lower() or "unauthorized" in error_msg.lower():
+        if "expired" in error_msg.lower() or "unauthorized" in error_msg.lower() or "sso" in error_msg.lower():
             return {
                 "model": chairman_label,
-                "response": f"API Error: Token expired or unauthorized. Please refresh your API credentials.",
+                "response": f"AWS Auth Error: {error_msg}",
                 "token_count": 0,
                 "error": True,
             }

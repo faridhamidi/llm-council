@@ -1,4 +1,4 @@
-"""In-memory session store for per-session Bedrock keys."""
+"""In-memory session store for web sessions and hidden Bedrock token fallback."""
 
 from __future__ import annotations
 

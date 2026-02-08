@@ -29,10 +29,13 @@ def _ensure_stages_column(conn: sqlite3.Connection) -> None:
 
 def _ensure_multiturn_columns(conn: sqlite3.Connection) -> None:
     """Ensure columns for multi-turn conversation support exist."""
-    # Check conversations table for settings_snapshot
+    # Check conversations table for settings_snapshot + mode
     conv_columns = [row["name"] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()]
     if "settings_snapshot" not in conv_columns:
         conn.execute("ALTER TABLE conversations ADD COLUMN settings_snapshot TEXT")
+    if "mode" not in conv_columns:
+        conn.execute("ALTER TABLE conversations ADD COLUMN mode TEXT DEFAULT 'council'")
+    conn.execute("UPDATE conversations SET mode = 'council' WHERE mode IS NULL OR mode = ''")
     
     # Check messages table for message_type, token_count, speaker_response
     msg_columns = [row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()]
@@ -378,7 +381,8 @@ def init_db() -> None:
               id TEXT PRIMARY KEY,
               created_at TEXT NOT NULL,
               title TEXT NOT NULL,
-              deleted_at TEXT
+              deleted_at TEXT,
+              mode TEXT NOT NULL DEFAULT 'council'
             );
 
             CREATE TABLE IF NOT EXISTS messages (

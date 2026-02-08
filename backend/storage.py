@@ -13,7 +13,11 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
-def create_conversation(conversation_id: str, settings_snapshot: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def create_conversation(
+    conversation_id: str,
+    settings_snapshot: Dict[str, Any] | None = None,
+    mode: str = "council",
+) -> Dict[str, Any]:
     """
     Create a new conversation with optional settings snapshot.
 
@@ -28,15 +32,22 @@ def create_conversation(conversation_id: str, settings_snapshot: Dict[str, Any] 
     conversation = {
         "id": conversation_id,
         "created_at": created_at,
-        "title": "New Conversation",
+        "title": "New Chat" if mode == "chat" else "New Conversation",
         "messages": [],
         "settings_snapshot": settings_snapshot,
+        "mode": mode,
     }
 
     with with_connection() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, created_at, title, deleted_at, settings_snapshot) VALUES (?, ?, ?, NULL, ?)",
-            (conversation_id, created_at, conversation["title"], json.dumps(settings_snapshot) if settings_snapshot else None),
+            "INSERT INTO conversations (id, created_at, title, deleted_at, settings_snapshot, mode) VALUES (?, ?, ?, NULL, ?, ?)",
+            (
+                conversation_id,
+                created_at,
+                conversation["title"],
+                json.dumps(settings_snapshot) if settings_snapshot else None,
+                mode,
+            ),
         )
         conn.commit()
 
@@ -55,7 +66,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """
     with with_connection() as conn:
         row = conn.execute(
-            "SELECT id, created_at, title, settings_snapshot FROM conversations WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, created_at, title, settings_snapshot, mode FROM conversations WHERE id = ? AND deleted_at IS NULL",
             (conversation_id,),
         ).fetchone()
         if row is None:
@@ -144,6 +155,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         "title": row["title"],
         "messages": messages,
         "settings_snapshot": settings_snapshot,
+        "mode": row["mode"] or "council",
         "total_tokens": total_tokens,
     }
 
@@ -159,6 +171,7 @@ def list_conversations() -> List[Dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT c.id, c.created_at, c.title,
+              c.mode,
               (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
             FROM conversations c
             WHERE c.deleted_at IS NULL
@@ -171,6 +184,7 @@ def list_conversations() -> List[Dict[str, Any]]:
             "id": row["id"],
             "created_at": row["created_at"],
             "title": row["title"],
+            "mode": row["mode"] or "council",
             "message_count": row["message_count"],
         }
         for row in rows

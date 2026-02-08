@@ -11,12 +11,11 @@ export default function Sidebar({
   onDeleteConversation,
   accessKeyReady = true,
 }) {
-  const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
-  const [tokenInput, setTokenInput] = useState('');
-  const [tokenStatus, setTokenStatus] = useState(null);
   const [regionOptions, setRegionOptions] = useState([]);
   const [selectedRegion, setSelectedRegion] = useState('');
   const [regionStatus, setRegionStatus] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState(null);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   const [isCouncilModalOpen, setIsCouncilModalOpen] = useState(false);
   const [councilSettings, setCouncilSettings] = useState(null);
   const [councilModels, setCouncilModels] = useState([]);
@@ -114,7 +113,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!accessKeyReady) return;
     let isMounted = true;
-    const loadRegions = async () => {
+    const loadSetup = async () => {
       try {
         const [optionsResponse, regionResponse] = await Promise.all([
           api.listBedrockRegions(),
@@ -126,24 +125,32 @@ export default function Sidebar({
       } catch (error) {
         console.error('Failed to load region settings:', error);
       }
+
+      try {
+        const connectionResponse = await api.getBedrockConnectionStatus();
+        if (!isMounted) return;
+        setConnectionStatus(connectionResponse);
+      } catch (error) {
+        if (!isMounted) return;
+        setConnectionStatus({
+          ok: false,
+          error: error.message || 'Failed to check Bedrock connection.',
+        });
+      }
     };
-    loadRegions();
+    loadSetup();
     return () => {
       isMounted = false;
     };
   }, [accessKeyReady]);
 
   useEffect(() => {
-    const isAnyModalOpen = isTokenModalOpen || isCouncilModalOpen;
+    const isAnyModalOpen = isCouncilModalOpen;
     if (!isAnyModalOpen) return;
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
-        if (isCouncilModalOpen) {
-          closeCouncilModal();
-        } else {
-          closeTokenModal();
-        }
+        closeCouncilModal();
       }
     };
 
@@ -155,32 +162,20 @@ export default function Sidebar({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isTokenModalOpen, isCouncilModalOpen]);
+  }, [isCouncilModalOpen]);
 
-  const openTokenModal = () => {
-    setTokenStatus(null);
-    setTokenInput('');
-    setIsTokenModalOpen(true);
-  };
-
-  const closeTokenModal = () => {
-    setIsTokenModalOpen(false);
-  };
-
-  const handleTokenSubmit = async (event) => {
-    event.preventDefault();
-    const trimmed = tokenInput.trim();
-    if (!trimmed) {
-      setTokenStatus({ type: 'error', message: 'Token cannot be empty.' });
-      return;
-    }
-
+  const checkBedrockConnection = async () => {
+    setIsCheckingConnection(true);
     try {
-      await api.updateBedrockToken(trimmed);
-      setTokenStatus({ type: 'success', message: 'Token updated for this session.' });
-      setIsTokenModalOpen(false);
+      const status = await api.getBedrockConnectionStatus();
+      setConnectionStatus(status);
     } catch (error) {
-      setTokenStatus({ type: 'error', message: error.message || 'Failed to update token.' });
+      setConnectionStatus({
+        ok: false,
+        error: error.message || 'Failed to check Bedrock connection.',
+      });
+    } finally {
+      setIsCheckingConnection(false);
     }
   };
 
@@ -530,6 +525,7 @@ export default function Sidebar({
     try {
       const response = await api.updateBedrockRegion(selectedRegion);
       setRegionStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
+      await checkBedrockConnection();
       if (response.settings && isCouncilModalOpen) {
         const modelsResponse = await api.listBedrockModels();
         const models = modelsResponse.models || [];
@@ -617,11 +613,11 @@ export default function Sidebar({
       </div>
 
       <div className="sidebar-actions">
-        <button className="action-btn primary" onClick={onNewConversation}>
-          <span>+ New Conversation</span>
+        <button className="action-btn primary" onClick={() => onNewConversation('council')}>
+          <span>+ New Council</span>
         </button>
-        <button className="action-btn" onClick={openTokenModal}>
-          <span>Refresh Bedrock Token</span>
+        <button className="action-btn" onClick={() => onNewConversation('chat')}>
+          <span>+ New Chat</span>
         </button>
         <button className="action-btn" onClick={openCouncilModal}>
           <span>Council Settings</span>
@@ -645,14 +641,23 @@ export default function Sidebar({
         <button className="action-btn bedrock-update" onClick={handleRegionUpdate}>
           <span>Update</span>
         </button>
+        <button
+          className="action-btn bedrock-update"
+          onClick={checkBedrockConnection}
+          disabled={isCheckingConnection}
+        >
+          <span>{isCheckingConnection ? 'Checking...' : 'Check AWS SSO'}</span>
+        </button>
         {regionStatus && (
           <div className={`token-status ${regionStatus.type}`}>
             {regionStatus.message}
           </div>
         )}
-        {tokenStatus && (
-          <div className={`token-status ${tokenStatus.type}`}>
-            {tokenStatus.message}
+        {connectionStatus && (
+          <div className={`token-status ${connectionStatus.ok ? 'success' : 'error'}`}>
+            {connectionStatus.ok
+              ? `Connected via ${connectionStatus.mode === 'sso' ? 'AWS SSO' : 'AWS credentials'}${connectionStatus.profile ? ` (${connectionStatus.profile})` : ''}`
+              : (connectionStatus.error || 'Bedrock connection unavailable.')}
           </div>
         )}
       </div>
@@ -687,46 +692,12 @@ export default function Sidebar({
                 </button>
               </div>
               <div className="conversation-meta">
-                {conv.message_count} messages
+                {(conv.mode || 'council') === 'chat' ? 'Chat' : 'Council'} • {conv.message_count} messages
               </div>
             </div>
           ))
         )}
       </div>
-
-      {isTokenModalOpen && (
-        <div className="token-modal-backdrop" onClick={closeTokenModal}>
-          <div className="token-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="token-modal-header">
-              <h3>Update Bedrock API Key</h3>
-              <button className="token-modal-close" onClick={closeTokenModal}>
-                ×
-              </button>
-            </div>
-            <form className="token-modal-body" onSubmit={handleTokenSubmit}>
-              <label htmlFor="bedrock-token-input">Paste new token</label>
-              <textarea
-                id="bedrock-token-input"
-                value={tokenInput}
-                onChange={(event) => setTokenInput(event.target.value)}
-                placeholder="bedrock-api-key-..."
-                rows={4}
-              />
-              {tokenStatus && tokenStatus.type === 'error' && (
-                <div className="token-status error">{tokenStatus.message}</div>
-              )}
-              <div className="token-modal-actions">
-                <button type="button" className="token-cancel-btn" onClick={closeTokenModal}>
-                  Cancel
-                </button>
-                <button type="submit" className="token-save-btn">
-                  Update Token
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {isCouncilModalOpen && (
         <div className="token-modal-backdrop" onClick={closeCouncilModal}>

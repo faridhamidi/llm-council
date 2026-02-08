@@ -132,7 +132,7 @@ export default function ChatInterface({
 
   const renderSpeakerMessage = (msg) => {
     const speakerResponse = msg.speaker_response || msg.response;
-    const speakerModel = msg.speaker_model || msg.model || 'Council Speaker';
+    const speakerModel = msg.speaker_model || msg.model || (conversation?.mode === 'chat' ? 'Assistant' : 'Council Speaker');
     const hasError = msg.error;
 
     return (
@@ -185,11 +185,17 @@ export default function ChatInterface({
 
   // Calculate message counter display
   const hasMessages = conversation?.messages?.length > 0;
+  const conversationMode = conversation?.mode || 'council';
+  const isChatMode = conversationMode === 'chat';
   const messageCounter = remainingMessages !== undefined && remainingMessages !== null && hasMessages ? (
     <div className={`message-counter ${remainingMessages <= 5 ? 'warning' : ''} ${remainingMessages === 0 ? 'limit-reached' : ''}`}>
       {remainingMessages === 0
-        ? "Message limit reached. Start a new conversation."
-        : `${remainingMessages} follow-up${remainingMessages !== 1 ? 's' : ''} remaining`}
+        ? (isChatMode
+          ? "Chat message limit reached. Start a new chat."
+          : "Message limit reached. Start a new conversation.")
+        : (isChatMode
+          ? `${remainingMessages} message${remainingMessages !== 1 ? 's' : ''} remaining`
+          : `${remainingMessages} follow-up${remainingMessages !== 1 ? 's' : ''} remaining`)}
     </div>
   ) : null;
 
@@ -210,7 +216,7 @@ export default function ChatInterface({
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
             <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <p>{isChatMode ? 'Start chatting with a single model' : 'Ask a question to consult the LLM Council'}</p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -244,7 +250,7 @@ export default function ChatInterface({
         {isLoading && (
           <div className="loading-indicator">
             <div className="spinner"></div>
-            <span>Consulting the council...</span>
+            <span>{isChatMode ? 'Thinking...' : 'Consulting the council...'}</span>
             {onStop && (
               <button className="stop-button" onClick={onStop}>
                 Stop
@@ -295,7 +301,7 @@ export default function ChatInterface({
           <div className="input-wrapper">
             <textarea
               className="message-input"
-              placeholder="Ask a follow-up question..."
+              placeholder={isChatMode ? "Send a message..." : "Ask a follow-up question..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -303,30 +309,42 @@ export default function ChatInterface({
               rows={2}
             />
           </div>
-          <div className="input-actions">
-            <button
-              type="button"
-              className="reconvene-button"
-              title="Force the full council to reconvene and deliberate on this question."
-              disabled={!input.trim() || isLoading || remainingMessages === 0}
-              onClick={() => {
-                if (input.trim() && !isLoading) {
-                  onSendMessage(input, true); // Force Council
-                  setInput('');
-                }
-              }}
-            >
-              Ask Council
-            </button>
-            <button
-              type="submit"
-              className="send-button"
-              disabled={!input.trim() || isLoading || remainingMessages === 0}
-              title="Ask the Council Speaker (faster)"
-            >
-              Ask Speaker
-            </button>
-          </div>
+          {isChatMode ? (
+            <div className="input-actions">
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!input.trim() || isLoading || remainingMessages === 0}
+              >
+                Send
+              </button>
+            </div>
+          ) : (
+            <div className="input-actions">
+              <button
+                type="button"
+                className="reconvene-button"
+                title="Force the full council to reconvene and deliberate on this question."
+                disabled={!input.trim() || isLoading || remainingMessages === 0}
+                onClick={() => {
+                  if (input.trim() && !isLoading) {
+                    onSendMessage(input, true); // Force Council
+                    setInput('');
+                  }
+                }}
+              >
+                Ask Council
+              </button>
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!input.trim() || isLoading || remainingMessages === 0}
+                title="Ask the Council Speaker (faster)"
+              >
+                Ask Speaker
+              </button>
+            </div>
+          )}
         </form>
       )}
 
@@ -334,7 +352,9 @@ export default function ChatInterface({
         <form className="input-form" onSubmit={handleSubmit}>
           <textarea
             className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+            placeholder={isChatMode
+              ? "Send a message... (Shift+Enter for new line, Enter to send)"
+              : "Ask your question... (Shift+Enter for new line, Enter to send)"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

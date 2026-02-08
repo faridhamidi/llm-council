@@ -20,9 +20,10 @@ from .config import (
     BEDROCK_REGION_OPTIONS,
     list_converse_models_for_region,
     MAX_FOLLOW_UP_MESSAGES,
+    MAX_CHAT_MESSAGES,
     SPEAKER_CONTEXT_LEVELS,
-    get_bedrock_api_key,
 )
+from .openrouter import check_bedrock_connection
 from .council_settings import (
     get_settings,
     update_settings,
@@ -45,6 +46,7 @@ from .council import (
     generate_conversation_title,
     get_final_response,
     query_council_speaker,
+    query_normal_chat,
     estimate_token_count,
 )
 
@@ -67,6 +69,20 @@ def calculate_council_output_count(messages: List[Dict[str, Any]]) -> int:
                     # Single result (e.g. synthesis)
                     count += 1
     return count
+
+
+def _get_session_bedrock_token(request: Request) -> str | None:
+    """
+    Hidden fallback path: per-session bearer token support remains available
+    for manual/debug use, but UI no longer exposes token controls.
+    """
+    session_id = request.state.session_id
+    return session_store.get_bedrock_key(session_id)
+
+
+def _calculate_chat_remaining(messages: List[Dict[str, Any]]) -> int:
+    user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
+    return max(0, MAX_CHAT_MESSAGES - user_message_count)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -143,7 +159,7 @@ async def _require_pin(request: Request, call_next):
 
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
-    pass
+    mode: Literal["council", "chat"] = "council"
 
 
 class SendMessageRequest(BaseModel):
@@ -213,6 +229,7 @@ class ConversationMetadata(BaseModel):
     id: str
     created_at: str
     title: str
+    mode: Literal["council", "chat"] = "council"
     message_count: int
 
 
@@ -221,6 +238,7 @@ class Conversation(BaseModel):
     id: str
     created_at: str
     title: str
+    mode: Literal["council", "chat"] = "council"
     messages: List[Dict[str, Any]]
 
 
@@ -284,7 +302,8 @@ async def list_conversations():
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    mode = request.mode or "council"
+    conversation = storage.create_conversation(conversation_id, mode=mode)
     return conversation
 
 
@@ -328,15 +347,20 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    conversation_mode = conversation.get("mode", "council")
+
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    session_id = http_request.state.session_id
-    bedrock_key = session_store.get_bedrock_key(session_id)
-    if not bedrock_key:
-        bedrock_key = get_bedrock_api_key()
-    if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
+    bedrock_key = _get_session_bedrock_token(http_request)
+
+    if conversation_mode == "chat":
+        current_user_messages = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
+        if current_user_messages >= MAX_CHAT_MESSAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message limit reached. Maximum {MAX_CHAT_MESSAGES} messages allowed in chat mode.",
+            )
 
     # Estimate tokens for user message
     user_token_count = estimate_token_count(payload.content)
@@ -347,6 +371,38 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     # Refresh conversation to get the message we just added (for context)
     conversation = storage.get_conversation(conversation_id)
     messages = conversation.get("messages", [])
+
+    if conversation_mode == "chat":
+        settings = conversation.get("settings_snapshot") or get_settings()
+        if is_first_message and not conversation.get("settings_snapshot"):
+            storage.save_settings_snapshot(conversation_id, settings)
+            title = await generate_conversation_title(payload.content, api_key=bedrock_key)
+            storage.update_conversation_title(conversation_id, title)
+
+        chat_response = await query_normal_chat(
+            payload.content,
+            conversation.get("messages", []),
+            settings,
+            api_key=bedrock_key,
+        )
+
+        storage.add_speaker_message(
+            conversation_id,
+            chat_response.get("response", ""),
+            token_count=chat_response.get("token_count", 0),
+        )
+
+        updated_conversation = storage.get_conversation(conversation_id)
+        return {
+            "message_type": "speaker",
+            "model": chat_response.get("model", "Assistant"),
+            "response": chat_response.get("response", ""),
+            "error": chat_response.get("error", False),
+            "remaining_messages": _calculate_chat_remaining(updated_conversation.get("messages", [])),
+            "max_messages": MAX_CHAT_MESSAGES,
+            "mode": "chat",
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
 
     if is_first_message or payload.force_council:
         # Run full council process (either first run or manual reconvene)
@@ -489,16 +545,37 @@ async def retry_message(conversation_id: str, http_request: Request):
         content = last_user_msg.get("content", "")
     
     # Use the send_message logic but skip adding the user message
-    session_id = http_request.state.session_id
-    bedrock_key = session_store.get_bedrock_key(session_id)
-    if not bedrock_key:
-        bedrock_key = get_bedrock_api_key()
-    if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
+    bedrock_key = _get_session_bedrock_token(http_request)
     
     # Refresh conversation
     conversation = storage.get_conversation(conversation_id)
+    conversation_mode = conversation.get("mode", "council")
     settings = conversation.get("settings_snapshot") or get_settings()
+
+    if conversation_mode == "chat":
+        chat_response = await query_normal_chat(
+            last_user_msg.get("content", ""),
+            conversation.get("messages", []),
+            settings,
+            api_key=bedrock_key,
+        )
+
+        storage.add_speaker_message(
+            conversation_id,
+            chat_response.get("response", ""),
+            token_count=chat_response.get("token_count", 0),
+        )
+        updated_conversation = storage.get_conversation(conversation_id)
+        return {
+            "message_type": "speaker",
+            "model": chat_response.get("model", "Assistant"),
+            "response": chat_response.get("response", ""),
+            "error": chat_response.get("error", False),
+            "remaining_messages": _calculate_chat_remaining(updated_conversation.get("messages", [])),
+            "max_messages": MAX_CHAT_MESSAGES,
+            "mode": "chat",
+            "total_tokens": updated_conversation.get("total_tokens", 0),
+        }
     
     # Determine if this was a council or speaker response
     user_message_count = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
@@ -554,7 +631,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             speaker_response.get("response", ""),
             token_count=speaker_response.get("token_count", 0),
         )
-        
+        updated_conversation = storage.get_conversation(conversation_id)
         council_outputs = calculate_council_output_count(updated_conversation.get("messages", []))
         dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
         used_followups = max(0, user_message_count) # user_message_count here includes only the ones before retry? No wait.
@@ -564,7 +641,6 @@ async def retry_message(conversation_id: str, http_request: Request):
         used_followups = max(0, user_message_count - 1)
         
         remaining = max(0, dynamic_limit - used_followups)
-        updated_conversation = storage.get_conversation(conversation_id)
         
         return {
             "message_type": "speaker",
@@ -586,20 +662,33 @@ async def get_conversation_info(conversation_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
     
     messages = conversation.get("messages", [])
+    mode = conversation.get("mode", "council")
     user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
-    
-    # First message doesn't count against limit
-    # First message doesn't count against limit
+
+    if mode == "chat":
+        remaining = max(0, MAX_CHAT_MESSAGES - user_message_count)
+        return {
+            "id": conversation.get("id"),
+            "title": conversation.get("title"),
+            "mode": mode,
+            "message_count": len(messages),
+            "user_message_count": user_message_count,
+            "remaining_messages": remaining,
+            "max_messages": MAX_CHAT_MESSAGES,
+            "total_tokens": conversation.get("total_tokens", 0),
+            "has_settings_snapshot": conversation.get("settings_snapshot") is not None,
+        }
+
+    # Council mode: first message does not count against follow-up limit.
     follow_up_count = max(0, user_message_count - 1)
-    
     council_outputs = calculate_council_output_count(messages)
     dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
-    
     remaining = max(0, dynamic_limit - follow_up_count)
-    
+
     return {
         "id": conversation.get("id"),
         "title": conversation.get("title"),
+        "mode": mode,
         "message_count": len(messages),
         "user_message_count": user_message_count,
         "remaining_messages": remaining,
@@ -621,7 +710,8 @@ async def get_speaker_context_levels():
 @app.post("/api/settings/bedrock-token")
 async def update_bedrock_token(payload: UpdateBedrockTokenRequest, http_request: Request):
     """
-    Update the Bedrock API key at runtime (in-memory only).
+    Hidden fallback: update bearer token at runtime (in-memory only).
+    Primary path uses AWS SDK credentials (SSO/IAM).
     """
     token = payload.token.strip()
     if not token:
@@ -630,6 +720,14 @@ async def update_bedrock_token(payload: UpdateBedrockTokenRequest, http_request:
     session_id = http_request.state.session_id
     session_store.set_bedrock_key(session_id, token)
     return {"status": "ok"}
+
+
+@app.get("/api/settings/bedrock-connection")
+async def get_bedrock_connection_status(http_request: Request):
+    """Return Bedrock credential status for UI diagnostics."""
+    session_token = _get_session_bedrock_token(http_request)
+    status = await check_bedrock_connection(api_key=session_token)
+    return status
 
 
 @app.get("/api/settings/bedrock-region")
@@ -847,15 +945,20 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    conversation_mode = conversation.get("mode", "council")
+
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    session_id = http_request.state.session_id
-    bedrock_key = session_store.get_bedrock_key(session_id)
-    if not bedrock_key:
-        bedrock_key = get_bedrock_api_key()
-    if not bedrock_key:
-        raise HTTPException(status_code=400, detail="Bedrock key not set. Please configuring it in the settings or .env file.")
+    bedrock_key = _get_session_bedrock_token(http_request)
+
+    if conversation_mode == "chat":
+        user_message_count = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
+        if user_message_count >= MAX_CHAT_MESSAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message limit reached. Maximum {MAX_CHAT_MESSAGES} messages allowed in chat mode.",
+            )
 
     async def stream_worker(event_queue: "asyncio.Queue[Dict[str, Any]]", cancel_event: asyncio.Event):
         try:
@@ -866,6 +969,37 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
             # Add user message
             user_token_count = estimate_token_count(request.content)
             storage.add_user_message(conversation_id, request.content, token_count=user_token_count)
+
+            if conversation_mode == "chat":
+                conversation_snapshot = storage.get_conversation(conversation_id) or {}
+                settings = conversation_snapshot.get("settings_snapshot") or get_settings()
+                if is_first_message and not conversation_snapshot.get("settings_snapshot"):
+                    storage.save_settings_snapshot(conversation_id, settings)
+                    title = await generate_conversation_title(request.content, api_key=bedrock_key)
+                    storage.update_conversation_title(conversation_id, title)
+                    await event_queue.put({"type": "title_complete", "data": {"title": title}})
+
+                chat_response = await query_normal_chat(
+                    request.content,
+                    conversation_snapshot.get("messages", []),
+                    settings,
+                    api_key=bedrock_key,
+                )
+
+                storage.add_speaker_message(
+                    conversation_id,
+                    chat_response.get("response", ""),
+                    token_count=chat_response.get("token_count", 0),
+                )
+                latest = storage.get_conversation(conversation_id) or {}
+                await event_queue.put({
+                    "type": "speaker_complete",
+                    "data": chat_response,
+                    "remaining_messages": _calculate_chat_remaining(latest.get("messages", [])),
+                    "mode": "chat",
+                })
+                await event_queue.put({"type": "complete"})
+                return
 
             if is_first_message or request.force_council:
                 # Snapshot current settings for this conversation (if first message)

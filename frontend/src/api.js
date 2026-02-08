@@ -164,13 +164,13 @@ export const api = {
   /**
    * Create a new conversation.
    */
-  async createConversation() {
+  async createConversation(mode = 'council') {
     const response = await apiFetch('/api/conversations', {
       method: 'POST',
       headers: withAuth({
         'Content-Type': 'application/json',
       }),
-      body: JSON.stringify({}),
+      body: JSON.stringify({ mode }),
     });
     if (!response.ok) {
       throw new Error('Failed to create conversation');
@@ -233,7 +233,14 @@ export const api = {
       body: JSON.stringify({ content, force_council: forceCouncil }),
     });
     if (!response.ok) {
-      throw new Error('Failed to send message');
+      const errorText = await response.text();
+      let detail = errorText;
+      try {
+        detail = JSON.parse(errorText || '{}').detail || errorText;
+      } catch (_) {
+        // Keep raw text.
+      }
+      throw new Error(detail || 'Failed to send message');
     }
     return response.json();
   },
@@ -304,7 +311,14 @@ export const api = {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to send message');
+      const errorText = await response.text();
+      let detail = errorText;
+      try {
+        detail = JSON.parse(errorText || '{}').detail || errorText;
+      } catch (_) {
+        // Keep raw text.
+      }
+      throw new Error(detail || 'Failed to send message');
     }
 
     const reader = response.body.getReader();
@@ -332,7 +346,8 @@ export const api = {
   },
 
   /**
-   * Update the Bedrock API token at runtime.
+   * Hidden fallback: update Bedrock bearer token at runtime.
+   * The UI intentionally does not expose this path.
    */
   async updateBedrockToken(token) {
     const response = await apiFetch('/api/settings/bedrock-token', {
@@ -345,6 +360,20 @@ export const api = {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to update Bedrock token');
+    }
+    return response.json();
+  },
+
+  /**
+   * Check Bedrock auth connection status (AWS SSO/IAM first, hidden token fallback).
+   */
+  async getBedrockConnectionStatus() {
+    const response = await apiFetch('/api/settings/bedrock-connection', {
+      headers: withAuth(),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to check Bedrock connection');
     }
     return response.json();
   },

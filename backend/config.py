@@ -18,7 +18,7 @@ def set_bedrock_api_key(token: str) -> None:
     _BEDROCK_API_KEY = token.strip()
 
 # AWS region (Bedrock Runtime endpoint)
-_AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
+_AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 
 
 def get_bedrock_region() -> str:
@@ -35,6 +35,15 @@ def get_bedrock_runtime_url() -> str:
 
 # Converse-capable Bedrock model families (curated list).
 CONVERSE_MODEL_FAMILIES = [
+    {
+        "family_id": "claude-opus-4-6",
+        "label": "Claude Opus 4.6",
+        "provider": "anthropic",
+        "variants": {
+            "us": "us.anthropic.claude-opus-4-6-v1",
+            "global": "global.anthropic.claude-opus-4-6-v1",
+        },
+    },
     {
         "family_id": "claude-opus-4-5",
         "label": "Claude Opus 4.5",
@@ -332,6 +341,7 @@ DATA_DIR = "data/conversations"
 
 # Multi-turn conversation settings
 MAX_FOLLOW_UP_MESSAGES = 20  # Maximum follow-up messages per conversation (easily adjustable)
+MAX_CHAT_MESSAGES = 50  # Maximum user messages for normal chat mode per conversation
 
 # Speaker context levels - determines how much context the speaker receives for follow-ups
 SPEAKER_CONTEXT_LEVELS = {
