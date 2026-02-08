@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Council Studio (Prototype)</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div class="brand-text">
+          <div class="brand-title">Council Studio</div>
+          <div class="brand-subtitle">Externalize pipeline shape, membership, and prompts</div>
+        </div>
+      </div>
+
+      <div class="stepper-wrap" aria-label="Studio workflow">
+        <div class="stepper-title">Studio Workflow · 3 Steps</div>
+        <nav class="stepper" role="tablist" aria-label="Studio steps">
+          <button class="step is-active" role="tab" data-step="roles" aria-selected="true">
+            <span class="step-index">1</span>
+            <span class="step-label">Roles</span>
+          </button>
+          <button class="step" role="tab" data-step="stages" aria-selected="false">
+            <span class="step-index">2</span>
+            <span class="step-label">Stages</span>
+          </button>
+          <button class="step" role="tab" data-step="overview" aria-selected="false">
+            <span class="step-index">3</span>
+            <span class="step-label">Overview</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="top-actions">
+        <button class="btn btn-secondary" id="btnBack">Back</button>
+        <button class="btn btn-secondary" id="btnNext">Next</button>
+        <button class="btn btn-secondary" id="btnReset">Reset</button>
+        <button class="btn btn-primary" id="btnExport">Export JSON</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel panel-center" id="panelCenter">
+        <div class="panel-head">
+          <div class="panel-title" id="centerTitle">Roles</div>
+          <div class="panel-meta" id="centerMeta">Define council roles and assign models as tools.</div>
+        </div>
+        <div class="roles-view" id="rolesView">
+          <div class="roles-toolbar">
+            <button class="btn btn-secondary" id="btnAddRole">Add Role</button>
+            <div class="roles-help">Roles are seats; models are tools.</div>
+          </div>
+          <div class="roles-list" id="rolesList"></div>
+        </div>
+
+        <div class="stages-view is-hidden" id="stagesView">
+          <div class="stage-builder">
+            <div class="stage-builder-head">
+              <div>
+                <div class="stage-builder-title">Stages</div>
+                <div class="stage-builder-meta">Add, reorder, and select stages.</div>
+              </div>
+              <div class="stage-builder-actions">
+                <button class="btn btn-secondary" id="btnAddStage" type="button">Add Stage</button>
+                <button class="btn btn-secondary" id="btnRemoveStage" type="button">Remove Stage</button>
+                <button class="btn btn-ghost" id="btnMoveStageUp" type="button">Move Up</button>
+                <button class="btn btn-ghost" id="btnMoveStageDown" type="button">Move Down</button>
+              </div>
+            </div>
+            <div class="stage-builder-list" id="stageList"></div>
+          </div>
+          <section class="member-manager" aria-label="Stage membership manager">
+            <div class="member-manager-head">
+              <div>
+                <div class="member-manager-title">Stage Membership</div>
+                <div class="member-manager-meta" id="memberManagerMeta"></div>
+              </div>
+              <div class="member-manager-actions">
+                <button class="btn btn-secondary" id="btnAssignAll" type="button">Assign All</button>
+                <button class="btn btn-ghost" id="btnClearStage" type="button">Clear Stage</button>
+              </div>
+            </div>
+            <div class="member-manager-body">
+              <div class="member-column">
+                <div class="member-column-title">Assigned to Stage</div>
+                <div class="member-list" id="assignedList"></div>
+              </div>
+              <div class="member-column">
+                <div class="member-column-title">Available Roles</div>
+                <input class="input" id="memberSearch" placeholder="Filter roles by name or model" />
+                <div class="member-list" id="availableList"></div>
+              </div>
+            </div>
+          </section>
+          <div class="matrix-view" id="matrixView">
+            <div class="matrix-wrap">
+              <div class="matrix" id="matrix"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="overview is-hidden" id="overviewView">
+          <div class="overview-section overview-flow">
+            <div class="overview-section-title">Pipeline Flow</div>
+            <div class="overview-flow-body">
+              <div class="overview-flow-list" id="overviewStageList"></div>
+              <div class="overview-flow-graph">
+                <svg id="graphSvgOverview" viewBox="0 0 920 360" role="img" aria-label="Pipeline flow diagram (overview)"></svg>
+              </div>
+            </div>
+          </div>
+          <div class="overview-section overview-details">
+            <div class="overview-columns">
+              <div class="overview-column">
+                <div class="overview-section-title">Stage Details</div>
+                <div class="overview-table" id="overviewStageTable"></div>
+              </div>
+              <div class="overview-column">
+                <div class="overview-section-title">Roles & Models</div>
+                <div class="overview-rolelist" id="overviewRoleList"></div>
+              </div>
+            </div>
+          </div>
+          <div class="overview-section">
+            <div class="overview-section-title">Lint & Validation</div>
+            <div class="lint-list" id="lintListOverview"></div>
+          </div>
+          <div class="overview-section">
+            <div class="overview-section-title">Preview & JSON</div>
+            <div class="overview-actions">
+              <button class="btn btn-secondary" id="btnOpenPreview">Prompt Preview</button>
+              <button class="btn btn-secondary" id="btnOpenDiff">Settings JSON</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel-right" id="panelRight">
+        <div class="panel-head">
+          <div class="panel-title">Inspector</div>
+          <div class="panel-meta">Stage + member details and prompt preview</div>
+        </div>
+
+        <div class="inspector">
+          <div class="inspector-block" id="inspectorStage"></div>
+          <div class="inspector-block" id="inspectorMember"></div>
+          <div class="inspector-block" id="rosterBlock"></div>
+        </div>
+
+        <div class="architect">
+          <div class="panel-head">
+            <div class="panel-title">Architect (Propose-Only)</div>
+            <div class="panel-meta">Describe changes. This prototype generates a safe patch preview.</div>
+          </div>
+          <div class="architect-body">
+            <textarea id="architectInput" placeholder="e.g., Add a debate stage where only Claude + DeepSeek critique, then synthesize." rows="4"></textarea>
+            <div class="architect-actions">
+              <button class="btn btn-secondary" id="btnPropose">Propose Patch</button>
+              <button class="btn btn-ghost" id="btnApply" disabled>Apply (Disabled in Prototype)</button>
+            </div>
+            <pre class="codebox" id="architectOutput" aria-label="Patch preview"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel-full is-hidden" id="panelPreview">
+        <div class="panel-head">
+          <div class="panel-title">Prompt Preview</div>
+          <div class="panel-meta">Rendered prompt (templated) for selected stage + member</div>
+        </div>
+        <div class="preview">
+          <div class="preview-controls" id="previewControls"></div>
+          <pre class="codebox preview-box" id="previewBox"></pre>
+        </div>
+      </section>
+
+      <section class="panel panel-full is-hidden" id="panelDiff">
+        <div class="panel-head">
+          <div class="panel-title">Settings JSON</div>
+          <div class="panel-meta">What the backend would receive</div>
+        </div>
+        <pre class="codebox" id="diffBox"></pre>
+      </section>
+    </main>
+
+    <div class="toast is-hidden" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

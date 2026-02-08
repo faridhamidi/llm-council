@@ -173,14 +173,28 @@ async def _collect_stage_responses(
     tasks = []
     if execution_mode == "sequential":
         responses = []
-        for member in members:
+        running_messages = list(messages)
+        followup_prompt = "Please respond to the original prompt above, considering any prior members' responses."
+        for index, member in enumerate(members):
             response = await query_model(
                 member["model_id"],
-                messages,
+                running_messages,
                 system_prompt=member.get("system_prompt", ""),
                 api_key=api_key,
             )
             responses.append(response)
+            content = response.get("content") if response else None
+            if content:
+                label = member.get("alias", member.get("model_id", "Member"))
+                running_messages.append({
+                    "role": "assistant",
+                    "content": f"Previous member ({label}) response:\n{content}",
+                })
+                if index < len(members) - 1:
+                    running_messages.append({
+                        "role": "user",
+                        "content": followup_prompt,
+                    })
     else:
         tasks = [
             query_model(
@@ -285,14 +299,28 @@ async def collect_rankings(
         members = stage_members
     if execution_mode == "sequential":
         responses = []
-        for member in members:
+        running_messages = list(messages)
+        followup_prompt = "Please rank the responses using the original prompt above, considering any prior members' rankings."
+        for index, member in enumerate(members):
             response = await query_model(
                 member["model_id"],
-                messages,
+                running_messages,
                 system_prompt=member.get("system_prompt", "") if use_stage2_prompt else None,
                 api_key=api_key,
             )
             responses.append(response)
+            content = response.get("content") if response else None
+            if content:
+                label = member.get("alias", member.get("model_id", "Member"))
+                running_messages.append({
+                    "role": "assistant",
+                    "content": f"Previous member ({label}) ranking:\n{content}",
+                })
+                if index < len(members) - 1:
+                    running_messages.append({
+                        "role": "user",
+                        "content": followup_prompt,
+                    })
     else:
         tasks = [
             query_model(

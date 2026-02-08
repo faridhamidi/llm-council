@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Council Studio - Pipeline Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0b0d0f;
+            --bg-secondary: #121417;
+            --bg-tertiary: #171a1f;
+            --bg-elevated: #1e2229;
+            --bg-hover: #20252d;
+            --border-primary: #262b33;
+            --border-secondary: #1f232b;
+            --text-primary: #f3f4f6;
+            --text-secondary: #a1a1aa;
+            --text-tertiary: #6b7280;
+            --accent-green: #3ecf8e;
+            --accent-green-dark: #2da873;
+            --accent-green-light: #4fffb0;
+            --accent-yellow: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --glow: rgba(62, 207, 142, 0.18);
+            --glow-strong: rgba(62, 207, 142, 0.35);
+            --surface-0: var(--bg-primary);
+            --surface-1: var(--bg-secondary);
+            --surface-2: var(--bg-tertiary);
+            --surface-3: var(--bg-elevated);
+            --text-1: var(--text-primary);
+            --text-2: var(--text-secondary);
+            --text-3: var(--text-tertiary);
+            --border-1: var(--border-primary);
+            --border-2: var(--border-secondary);
+            --accent-1: var(--accent-green);
+            --accent-1-strong: var(--accent-green-dark);
+            --accent-1-soft: rgba(62, 207, 142, 0.12);
+            --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+            --space-5: 20px; --space-6: 24px; --space-7: 32px; --space-8: 40px;
+            --space-9: 48px; --space-10: 64px;
+            --radius-1: 6px; --radius-2: 10px; --radius-3: 14px; --radius-4: 18px; --radius-5: 24px;
+            --ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+            --duration-fast: 140ms; --duration-base: 220ms; --duration-slow: 360ms;
+            --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
+            --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Space Grotesk', -apple-system, sans-serif;
+            background: var(--surface-0);
+            color: var(--text-1);
+            line-height: 1.6;
+            font-size: 15px;
+        }
+        .app { max-width: 1600px; margin: 0 auto; padding: var(--space-8); }
+        .header {
+            margin-bottom: var(--space-9);
+            padding-bottom: var(--space-6);
+            border-bottom: 1px solid var(--border-2);
+        }
+        .header h1 {
+            font-size: 32px;
+            line-height: 40px;
+            font-weight: 700;
+            margin-bottom: var(--space-2);
+            letter-spacing: -0.02em;
+        }
+        .header p { color: var(--text-2); font-size: 15px; }
+        .stepper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-4);
+            margin-bottom: var(--space-9);
+            padding: var(--space-7);
+            background: var(--surface-1);
+            border-radius: var(--radius-3);
+            border: 1px solid var(--border-2);
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-6);
+            border-radius: var(--radius-2);
+            cursor: pointer;
+            transition: all var(--duration-base) var(--ease-standard);
+            border: 1px solid transparent;
+        }
+        .step:hover { background: var(--bg-hover); }
+        .step.active {
+            background: var(--accent-1-soft);
+            border-color: var(--accent-1);
+        }
+        .step.completed { background: var(--surface-2); }
+        .step-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 13px;
+            background: var(--surface-2);
+            color: var(--text-3);
+            border: 1px solid var(--border-1);
+            transition: all var(--duration-base) var(--ease-standard);
+        }
+        .step.active .step-number {
+            background: var(--accent-1);
+            color: var(--surface-0);
+            border-color: var(--accent-1);
+            box-shadow: 0 0 12px var(--glow);
+        }
+        .step.completed .step-number {
+            background: var(--surface-3);
+            color: var(--accent-1);
+            border-color: var(--border-1);
+        }
+        .step-label {
+            font-weight: 500;
+            color: var(--text-2);
+            font-size: 15px;
+        }
+        .step.active .step-label { color: var(--text-1); }
+        .step-divider {
+            width: 48px;
+            height: 1px;
+            background: var(--border-1);
+        }
+        .btn {
+            padding: var(--space-3) var(--space-5);
+            border-radius: var(--radius-2);
+            border: none;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--duration-base) var(--ease-standard);
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .btn-primary {
+            background: var(--accent-1);
+            color: var(--surface-0);
+        }
+        .btn-primary:hover {
+            background: var(--accent-1-strong);
+            box-shadow: 0 0 16px var(--glow);
+        }
+        .btn-secondary {
+            background: var(--surface-2);
+            color: var(--text-1);
+            border: 1px solid var(--border-1);
+        }
+        .btn-secondary:hover { background: var(--surface-3); }
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-2);
+        }
+        .btn-ghost:hover {
+            background: var(--surface-2);
+            color: var(--text-1);
+        }
+        .btn-danger {
+            background: var(--accent-red);
+            color: var(--text-1);
+        }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-sm {
+            padding: var(--space-2) var(--space-3);
+            font-size: 13px;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            margin-top: var(--space-9);
+            padding-top: var(--space-7);
+            border-top: 1px solid var(--border-2);
+        }
+        .step-content { min-height: 600px; }
+        .roles-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-6);
+        }
+        .roles-list {
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-3);
+            padding: var(--space-6);
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-6);
+        }
+        .section-header h2 {
+            font-size: 20px;
+            line-height: 28px;
+            font-weight: 600;
+        }
+        .role-card {
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+            margin-bottom: var(--space-3);
+            cursor: pointer;
+            transition: all var(--duration-base) var(--ease-standard);
+        }
+        .role-card:hover {
+            border-color: var(--accent-1);
+            background: var(--surface-3);
+            box-shadow: var(--shadow-1);
+        }
+        .role-card.selected {
+            border-color: var(--accent-1);
+            background: var(--accent-1-soft);
+            box-shadow: 0 0 0 1px var(--accent-1);
+        }
+        .role-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-2);
+        }
+        .role-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .role-model {
+            color: var(--text-3);
+            font-size: 13px;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .empty-state {
+            text-align: center;
+            padding: var(--space-9) var(--space-6);
+            color: var(--text-3);
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: var(--space-4);
+            opacity: 0.3;
+        }
+        .form-group { margin-bottom: var(--space-6); }
+        .form-group label {
+            display: block;
+            margin-bottom: var(--space-2);
+            color: var(--text-1);
+            font-weight: 500;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: var(--space-3);
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-1);
+            color: var(--text-1);
+            font-size: 15px;
+            font-family: 'Space Grotesk', sans-serif;
+            transition: all var(--duration-base) var(--ease-standard);
+        }
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-1);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            line-height: 20px;
+        }
+        .form-hint {
+            margin-top: var(--space-2);
+            font-size: 13px;
+            color: var(--text-3);
+        }
+        .stages-container {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: var(--space-6);
+        }
+        .stages-sidebar {
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-3);
+            padding: var(--space-6);
+            height: fit-content;
+            position: sticky;
+            top: var(--space-6);
+        }
+        .stage-item {
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+            margin-bottom: var(--space-3);
+            cursor: pointer;
+            transition: all var(--duration-base) var(--ease-standard);
+        }
+        .stage-item:hover {
+            border-color: var(--accent-1);
+            background: var(--surface-3);
+        }
+        .stage-item.selected {
+            border-color: var(--accent-1);
+            background: var(--accent-1-soft);
+            box-shadow: 0 0 0 1px var(--accent-1);
+        }
+        .stage-item.final {
+            border-color: var(--accent-yellow);
+            background: rgba(245, 158, 11, 0.08);
+        }
+        .stage-item.final.selected {
+            background: rgba(245, 158, 11, 0.15);
+            box-shadow: 0 0 0 1px var(--accent-yellow);
+        }
+        .stage-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-2);
+        }
+        .stage-number {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .badge {
+            padding: var(--space-1) var(--space-3);
+            border-radius: var(--radius-1);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-responses {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+        }
+        .badge-rankings {
+            background: rgba(168, 85, 247, 0.15);
+            color: #a855f7;
+        }
+        .badge-synthesis {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-yellow);
+        }
+        .stage-meta {
+            font-size: 13px;
+            color: var(--text-3);
+        }
+        .stage-reorder {
+            display: flex;
+            gap: var(--space-2);
+            margin-top: var(--space-3);
+        }
+        .stage-reorder button {
+            padding: var(--space-1) var(--space-3);
+            background: var(--surface-3);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-1);
+            color: var(--text-2);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: all var(--duration-fast) var(--ease-standard);
+        }
+        .stage-reorder button:hover:not(:disabled) {
+            background: var(--bg-hover);
+            color: var(--text-1);
+            border-color: var(--accent-1);
+        }
+        .stage-reorder button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .stage-editor {
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-3);
+            padding: var(--space-6);
+        }
+        .stage-editor h2 {
+            font-size: 20px;
+            line-height: 28px;
+            font-weight: 600;
+            margin-bottom: var(--space-2);
+        }
+        .subtitle {
+            color: var(--text-3);
+            font-size: 13px;
+            margin-bottom: var(--space-6);
+        }
+        .info-box {
+            background: var(--accent-1-soft);
+            border: 1px solid var(--accent-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+            margin-bottom: var(--space-6);
+        }
+        .info-box.warning {
+            background: rgba(245, 158, 11, 0.12);
+            border-color: var(--accent-yellow);
+        }
+        .info-box-title {
+            font-weight: 600;
+            color: var(--accent-1);
+            margin-bottom: var(--space-2);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .info-box.warning .info-box-title {
+            color: var(--accent-yellow);
+        }
+        .info-box-content {
+            color: var(--text-2);
+            font-size: 13px;
+            line-height: 20px;
+        }
+        .role-assignment { margin-top: var(--space-7); }
+        .role-assignment h3 {
+            font-size: 18px;
+            line-height: 26px;
+            margin-bottom: var(--space-4);
+            font-weight: 600;
+        }
+        .role-lists {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-4);
+        }
+        .role-list-container {
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+            min-height: 200px;
+        }
+        .role-list-header {
+            font-weight: 600;
+            margin-bottom: var(--space-3);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .role-count {
+            font-weight: 500;
+            color: var(--text-3);
+            font-size: 11px;
+        }
+        .role-list-item {
+            background: var(--surface-3);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-1);
+            padding: var(--space-3);
+            margin-bottom: var(--space-2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all var(--duration-fast) var(--ease-standard);
+        }
+        .role-list-item:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-1);
+        }
+        .role-list-item-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .overview-container {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-6);
+        }
+        .overview-section {
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-3);
+            padding: var(--space-6);
+        }
+        .overview-section h2 {
+            font-size: 20px;
+            line-height: 28px;
+            margin-bottom: var(--space-6);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+        }
+        .section-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-1);
+        }
+        .pipeline-flow {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+        }
+        .flow-stage {
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-5);
+            transition: all var(--duration-base) var(--ease-standard);
+        }
+        .flow-stage:hover {
+            border-color: var(--accent-1);
+            box-shadow: var(--shadow-1);
+        }
+        .flow-stage.final {
+            border-color: var(--accent-yellow);
+            background: rgba(245, 158, 11, 0.08);
+        }
+        .flow-stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-4);
+        }
+        .flow-stage-title {
+            font-weight: 600;
+            font-size: 18px;
+        }
+        .flow-stage-meta {
+            display: flex;
+            gap: var(--space-3);
+        }
+        .flow-stage-body {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: var(--space-5);
+        }
+        .flow-roles {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+        .flow-role-chip {
+            background: var(--surface-3);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-1);
+            padding: var(--space-2) var(--space-3);
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+        .flow-role-chip::before {
+            content: '●';
+            color: var(--accent-1);
+        }
+        .flow-prompt {
+            background: var(--surface-3);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-1);
+            padding: var(--space-3);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            line-height: 18px;
+            color: var(--text-2);
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .prompt-placeholder { color: var(--accent-1); }
+        .validation-item {
+            display: flex;
+            align-items: flex-start;
+            gap: var(--space-3);
+            padding: var(--space-4);
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            margin-bottom: var(--space-3);
+        }
+        .validation-item.error {
+            border-left: 3px solid var(--accent-red);
+            background: rgba(239, 68, 68, 0.08);
+        }
+        .validation-item.warning {
+            border-left: 3px solid var(--accent-yellow);
+            background: rgba(245, 158, 11, 0.08);
+        }
+        .validation-item.success {
+            border-left: 3px solid var(--accent-1);
+            background: var(--accent-1-soft);
+        }
+        .validation-icon {
+            font-size: 18px;
+            line-height: 1;
+        }
+        .validation-content { flex: 1; }
+        .validation-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: var(--space-1);
+        }
+        .validation-message {
+            color: var(--text-2);
+            font-size: 13px;
+            line-height: 20px;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: var(--space-6);
+        }
+        .modal {
+            background: var(--surface-1);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-3);
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-2);
+        }
+        .modal-header {
+            padding: var(--space-6);
+            border-bottom: 1px solid var(--border-1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .modal-body {
+            padding: var(--space-6);
+            overflow-y: auto;
+            flex: 1;
+        }
+        .modal-footer {
+            padding: var(--space-6);
+            border-top: 1px solid var(--border-1);
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-3);
+        }
+        .code-block {
+            background: var(--surface-0);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            line-height: 18px;
+            color: var(--text-2);
+            overflow-x: auto;
+            white-space: pre;
+        }
+        .roles-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: var(--space-4);
+        }
+        .role-summary-card {
+            background: var(--surface-2);
+            border: 1px solid var(--border-1);
+            border-radius: var(--radius-2);
+            padding: var(--space-4);
+        }
+        .role-summary-name {
+            font-weight: 600;
+            margin-bottom: var(--space-2);
+            font-size: 15px;
+        }
+        .role-summary-model {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--text-3);
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--surface-1); }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-1);
+            border-radius: var(--radius-1);
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-1); }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn var(--duration-base) var(--ease-standard); }
+        .action-bar {
+            display: flex;
+            gap: var(--space-3);
+            margin-top: var(--space-6);
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const AVAILABLE_MODELS = [
+            { id: 'gpt-4o', name: 'GPT-4o' },
+            { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+            { id: 'claude-3-opus', name: 'Claude 3 Opus' },
+            { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+            { id: 'gemini-pro', name: 'Gemini Pro' },
+        ];
+
+        const STAGE_KINDS = [
+            { value: 'responses', label: 'Responses', description: 'Generate initial responses' },
+            { value: 'rankings', label: 'Rankings', description: 'Rank previous responses' },
+            { value: 'synthesis', label: 'Synthesis', description: 'Synthesize final answer' },
+        ];
+
+        const EXECUTION_MODES = [
+            { value: 'parallel', label: 'Parallel', description: 'Isolated responses' },
+            { value: 'sequential', label: 'Sequential', description: 'See prior outputs' },
+        ];
+
+        const generateId = () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        function CouncilEditor() {
+            const [currentStep, setCurrentStep] = useState(1);
+            const [roles, setRoles] = useState([]);
+            const [selectedRoleId, setSelectedRoleId] = useState(null);
+            const [stages, setStages] = useState([]);
+            const [selectedStageId, setSelectedStageId] = useState(null);
+            const [showJsonModal, setShowJsonModal] = useState(false);
+
+            useEffect(() => {
+                if (stages.length === 0) {
+                    const synthRole = {
+                        id: generateId(),
+                        name: 'Synthesizer',
+                        modelId: 'claude-3.5-sonnet',
+                        systemPrompt: '',
+                    };
+                    setRoles([synthRole]);
+
+                    const finalStage = {
+                        id: generateId(),
+                        name: 'Final Synthesis',
+                        kind: 'synthesis',
+                        executionMode: 'sequential',
+                        prompt: 'Based on the discussion:\n{stage1}\n{stage2}\n\nProvide the final synthesized answer to: {question}',
+                        memberIds: [synthRole.id],
+                        isFinal: true,
+                    };
+                    setStages([finalStage]);
+                    setSelectedRoleId(synthRole.id);
+                    setSelectedStageId(finalStage.id);
+                }
+            }, []);
+
+            const addRole = () => {
+                const newRole = {
+                    id: generateId(),
+                    name: `Role ${roles.length + 1}`,
+                    modelId: AVAILABLE_MODELS[0].id,
+                    systemPrompt: '',
+                };
+                setRoles([...roles, newRole]);
+                setSelectedRoleId(newRole.id);
+            };
+
+            const updateRole = (id, updates) => {
+                setRoles(roles.map(role => role.id === id ? { ...role, ...updates } : role));
+            };
+
+            const deleteRole = (id) => {
+                if (roles.length === 1) {
+                    alert('Cannot delete the last role. At least one role is required for synthesis.');
+                    return;
+                }
+                const usedInStages = stages.filter(stage => stage.memberIds.includes(id));
+                if (usedInStages.length > 0) {
+                    if (!confirm(`This role is used in ${usedInStages.length} stage(s). Remove it anyway?`)) {
+                        return;
+                    }
+                    setStages(stages.map(stage => ({
+                        ...stage,
+                        memberIds: stage.memberIds.filter(memberId => memberId !== id)
+                    })));
+                }
+                setRoles(roles.filter(role => role.id !== id));
+                if (selectedRoleId === id) {
+                    setSelectedRoleId(roles[0]?.id || null);
+                }
+            };
+
+            const addStage = () => {
+                if (stages.length >= 8) {
+                    alert('Maximum 7 stages allowed (plus final synthesis)');
+                    return;
+                }
+                const newStage = {
+                    id: generateId(),
+                    name: `Stage ${stages.length}`,
+                    kind: 'responses',
+                    executionMode: 'parallel',
+                    prompt: 'Please provide your perspective on: {question}',
+                    memberIds: [],
+                    isFinal: false,
+                };
+                const finalStageIndex = stages.findIndex(s => s.isFinal);
+                const newStages = [...stages];
+                newStages.splice(finalStageIndex, 0, newStage);
+                setStages(newStages);
+                setSelectedStageId(newStage.id);
+            };
+
+            const updateStage = (id, updates) => {
+                setStages(stages.map(stage => stage.id === id ? { ...stage, ...updates } : stage));
+            };
+
+            const deleteStage = (id) => {
+                const stage = stages.find(s => s.id === id);
+                if (stage?.isFinal) {
+                    alert('Cannot delete the final synthesis stage');
+                    return;
+                }
+                setStages(stages.filter(s => s.id !== id));
+                if (selectedStageId === id) {
+                    setSelectedStageId(stages[0]?.id || null);
+                }
+            };
+
+            const moveStage = (id, direction) => {
+                const index = stages.findIndex(s => s.id === id);
+                if (index === -1) return;
+                const newIndex = direction === 'up' ? index - 1 : index + 1;
+                if (newIndex < 0 || newIndex >= stages.length - 1) return;
+                const newStages = [...stages];
+                [newStages[index], newStages[newIndex]] = [newStages[newIndex], newStages[index]];
+                setStages(newStages);
+            };
+
+            const assignRoleToStage = (stageId, roleId) => {
+                const stage = stages.find(s => s.id === stageId);
+                if (!stage) return;
+                if (stage.isFinal) {
+                    updateStage(stageId, { memberIds: [roleId] });
+                } else {
+                    if (stage.memberIds.includes(roleId)) {
+                        updateStage(stageId, { 
+                            memberIds: stage.memberIds.filter(id => id !== roleId) 
+                        });
+                    } else {
+                        if (stage.memberIds.length >= 6) {
+                            alert('Maximum 6 roles per stage');
+                            return;
+                        }
+                        updateStage(stageId, { 
+                            memberIds: [...stage.memberIds, roleId] 
+                        });
+                    }
+                }
+            };
+
+            const validate = () => {
+                const errors = [];
+                const warnings = [];
+                if (roles.length === 0) {
+                    errors.push({ type: 'error', title: 'No Roles', message: 'At least one role is required' });
+                }
+                stages.forEach((stage, index) => {
+                    if (!stage.name.trim()) {
+                        errors.push({ type: 'error', title: `Stage ${index + 1}`, message: 'Stage name cannot be empty' });
+                    }
+                    if (!stage.isFinal && stage.memberIds.length === 0) {
+                        errors.push({ type: 'error', title: `Stage ${index + 1}`, message: 'Stage must have at least one role assigned' });
+                    }
+                    if (stage.memberIds.length > 6) {
+                        errors.push({ type: 'error', title: `Stage ${index + 1}`, message: 'Stage cannot have more than 6 roles' });
+                    }
+                    if (stage.isFinal && stage.memberIds.length !== 1) {
+                        errors.push({ type: 'error', title: 'Final Synthesis', message: 'Final stage must have exactly 1 role' });
+                    }
+                    if (stage.kind === 'rankings' && !stage.prompt.includes('{responses}')) {
+                        warnings.push({ type: 'warning', title: `Stage ${index + 1}`, message: 'Rankings stage should include {responses} placeholder' });
+                    }
+                    if (stage.kind === 'synthesis' && !stage.prompt.includes('{stage')) {
+                        warnings.push({ type: 'warning', title: `Stage ${index + 1}`, message: 'Synthesis stage should reference previous stages' });
+                    }
+                    if (stage.executionMode === 'sequential' && stage.memberIds.length > 1) {
+                        warnings.push({ type: 'warning', title: `Stage ${index + 1}`, message: 'Sequential stages may increase token cost' });
+                    }
+                });
+                const finalIndex = stages.findIndex(s => s.isFinal);
+                if (finalIndex !== stages.length - 1) {
+                    errors.push({ type: 'error', title: 'Final Stage', message: 'Final synthesis stage must be last' });
+                }
+                return { errors, warnings, isValid: errors.length === 0 };
+            };
+
+            const exportJson = () => {
+                const chairmanId = stages.find(s => s.isFinal)?.memberIds[0] || null;
+                return {
+                    members: roles.map(role => ({
+                        id: role.id,
+                        alias: role.name,
+                        model_id: role.modelId,
+                        system_prompt: role.systemPrompt || null,
+                    })),
+                    stages: stages.map((stage, index) => ({
+                        id: stage.id,
+                        name: stage.name,
+                        kind: stage.kind,
+                        execution_mode: stage.executionMode,
+                        prompt: stage.prompt,
+                        member_ids: stage.memberIds,
+                        order: index,
+                    })),
+                    chairman_id: chairmanId,
+                };
+            };
+
+            const selectedRole = roles.find(r => r.id === selectedRoleId);
+            const selectedStage = stages.find(s => s.id === selectedStageId);
+            const validation = validate();
+
+            return (
+                <div className="app fade-in">
+                    <header className="header">
+                        <h1>Council Studio</h1>
+                        <p>Configure your LLM Council pipeline with roles, stages, and execution flow</p>
+                    </header>
+
+                    <div className="stepper">
+                        <div 
+                            className={`step ${currentStep === 1 ? 'active' : ''} ${currentStep > 1 ? 'completed' : ''}`}
+                            onClick={() => setCurrentStep(1)}
+                        >
+                            <div className="step-number">1</div>
+                            <div className="step-label">Roles</div>
+                        </div>
+                        <div className="step-divider"></div>
+                        <div 
+                            className={`step ${currentStep === 2 ? 'active' : ''} ${currentStep > 2 ? 'completed' : ''}`}
+                            onClick={() => setCurrentStep(2)}
+                        >
+                            <div className="step-number">2</div>
+                            <div className="step-label">Stages</div>
+                        </div>
+                        <div className="step-divider"></div>
+                        <div 
+                            className={`step ${currentStep === 3 ? 'active' : ''}`}
+                            onClick={() => setCurrentStep(3)}
+                        >
+                            <div className="step-number">3</div>
+                            <div className="step-label">Overview</div>
+                        </div>
+                    </div>
+
+                    <div className="step-content">
+                        {currentStep === 1 && (
+                            <Step1Roles
+                                roles={roles}
+                                selectedRoleId={selectedRoleId}
+                                setSelectedRoleId={setSelectedRoleId}
+                                addRole={addRole}
+                                updateRole={updateRole}
+                                deleteRole={deleteRole}
+                                selectedRole={selectedRole}
+                            />
+                        )}
+                        {currentStep === 2 && (
+                            <Step2Stages
+                                stages={stages}
+                                roles={roles}
+                                selectedStageId={selectedStageId}
+                                setSelectedStageId={setSelectedStageId}
+                                addStage={addStage}
+                                updateStage={updateStage}
+                                deleteStage={deleteStage}
+                                moveStage={moveStage}
+                                assignRoleToStage={assignRoleToStage}
+                                selectedStage={selectedStage}
+                            />
+                        )}
+                        {currentStep === 3 && (
+                            <Step3Overview
+                                stages={stages}
+                                roles={roles}
+                                validation={validation}
+                                onShowJson={() => setShowJsonModal(true)}
+                                exportJson={exportJson}
+                            />
+                        )}
+                    </div>
+
+                    <div className="navigation">
+                        <button 
+                            className="btn btn-ghost"
+                            onClick={() => setCurrentStep(Math.max(1, currentStep - 1))}
+                            disabled={currentStep === 1}
+                        >
+                            ← Back
+                        </button>
+                        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+                            {currentStep < 3 && (
+                                <button 
+                                    className="btn btn-primary"
+                                    onClick={() => setCurrentStep(currentStep + 1)}
+                                >
+                                    Next →
+                                </button>
+                            )}
+                            {currentStep === 3 && (
+                                <button 
+                                    className="btn btn-primary"
+                                    onClick={() => {
+                                        if (validation.isValid) {
+                                            alert('Configuration saved! (In production, this would save to backend)');
+                                        } else {
+                                            alert('Please fix validation errors before saving');
+                                        }
+                                    }}
+                                    disabled={!validation.isValid}
+                                >
+                                    Save Configuration
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {showJsonModal && (
+                        <JsonModal 
+                            json={exportJson()} 
+                            onClose={() => setShowJsonModal(false)} 
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function Step1Roles({ roles, selectedRoleId, setSelectedRoleId, addRole, updateRole, deleteRole, selectedRole }) {
+            return (
+                <div className="roles-container">
+                    <div className="roles-list">
+                        <div className="section-header">
+                            <h2>Roles</h2>
+                            <button className="btn btn-primary btn-sm" onClick={addRole}>
+                                + Add Role
+                            </button>
+                        </div>
+                        {roles.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-state-icon">👥</div>
+                                <p>No roles yet. Add your first role to get started.</p>
+                            </div>
+                        ) : (
+                            roles.map(role => (
+                                <div
+                                    key={role.id}
+                                    className={`role-card ${selectedRoleId === role.id ? 'selected' : ''}`}
+                                    onClick={() => setSelectedRoleId(role.id)}
+                                >
+                                    <div className="role-card-header">
+                                        <div className="role-name">{role.name}</div>
+                                    </div>
+                                    <div className="role-model">{AVAILABLE_MODELS.find(m => m.id === role.modelId)?.name}</div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <div className="roles-list">
+                        {selectedRole ? (
+                            <>
+                                <div className="section-header">
+                                    <h2>Edit Role</h2>
+                                    <button 
+                                        className="btn btn-danger btn-sm"
+                                        onClick={() => deleteRole(selectedRole.id)}
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                                <div className="form-group">
+                                    <label>Role Name</label>
+                                    <input
+                                        type="text"
+                                        value={selectedRole.name}
+                                        onChange={(e) => updateRole(selectedRole.id, { name: e.target.value })}
+                                        placeholder="e.g., Risk Auditor, Creative Director"
+                                    />
+                                    <div className="form-hint">A descriptive name for this council seat</div>
+                                </div>
+                                <div className="form-group">
+                                    <label>Model</label>
+                                    <select
+                                        value={selectedRole.modelId}
+                                        onChange={(e) => updateRole(selectedRole.id, { modelId: e.target.value })}
+                                    >
+                                        {AVAILABLE_MODELS.map(model => (
+                                            <option key={model.id} value={model.id}>{model.name}</option>
+                                        ))}
+                                    </select>
+                                    <div className="form-hint">LLM model assigned to this role</div>
+                                </div>
+                                <div className="form-group">
+                                    <label>System Prompt (Optional)</label>
+                                    <textarea
+                                        value={selectedRole.systemPrompt}
+                                        onChange={(e) => updateRole(selectedRole.id, { systemPrompt: e.target.value })}
+                                        placeholder="You are a risk auditor focused on identifying potential issues..."
+                                    />
+                                    <div className="form-hint">Custom instructions for this role's perspective</div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="empty-state">
+                                <div className="empty-state-icon">←</div>
+                                <p>Select a role to edit</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function Step2Stages({ stages, roles, selectedStageId, setSelectedStageId, addStage, updateStage, deleteStage, moveStage, assignRoleToStage, selectedStage }) {
+            return (
+                <div className="stages-container">
+                    <div className="stages-sidebar">
+                        <div className="section-header">
+                            <h2>Stages</h2>
+                            <button 
+                                className="btn btn-primary btn-sm" 
+                                onClick={addStage}
+                                disabled={stages.length >= 8}
+                            >
+                                + Add
+                            </button>
+                        </div>
+                        {stages.map((stage, index) => (
+                            <div
+                                key={stage.id}
+                                className={`stage-item ${selectedStageId === stage.id ? 'selected' : ''} ${stage.isFinal ? 'final' : ''}`}
+                                onClick={() => setSelectedStageId(stage.id)}
+                            >
+                                <div className="stage-item-header">
+                                    <div className="stage-number">Stage {index + 1}</div>
+                                    <div className={`badge badge-${stage.kind}`}>{stage.kind}</div>
+                                </div>
+                                <div className="stage-meta">{stage.name}</div>
+                                {!stage.isFinal && (
+                                    <div className="stage-reorder">
+                                        <button onClick={(e) => { e.stopPropagation(); moveStage(stage.id, 'up'); }} disabled={index === 0}>↑</button>
+                                        <button onClick={(e) => { e.stopPropagation(); moveStage(stage.id, 'down'); }} disabled={index >= stages.length - 2}>↓</button>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteStage(stage.id); }}>Delete</button>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="stage-editor">
+                        {selectedStage ? (
+                            <>
+                                <h2>{selectedStage.isFinal ? '🎯 ' : ''}Stage Configuration</h2>
+                                <div className="subtitle">
+                                    {selectedStage.isFinal ? 'Final synthesis stage (locked)' : `Configure stage ${stages.findIndex(s => s.id === selectedStage.id) + 1}`}
+                                </div>
+                                {selectedStage.isFinal && (
+                                    <div className="info-box warning">
+                                        <div className="info-box-title">⚠️ Final Synthesis Stage</div>
+                                        <div className="info-box-content">
+                                            This stage is always last and must have exactly 1 role assigned. 
+                                            The assigned role acts as the chairman/synthesizer for the entire council.
+                                        </div>
+                                    </div>
+                                )}
+                                {!selectedStage.isFinal && selectedStage.executionMode === 'sequential' && (
+                                    <div className="info-box">
+                                        <div className="info-box-title">ℹ️ Sequential Mode</div>
+                                        <div className="info-box-content">
+                                            Members respond one after another and can see previous members' outputs. 
+                                            This may increase token costs and create anchoring effects.
+                                        </div>
+                                    </div>
+                                )}
+                                {!selectedStage.isFinal && selectedStage.executionMode === 'parallel' && (
+                                    <div className="info-box">
+                                        <div className="info-box-title">ℹ️ Parallel Mode</div>
+                                        <div className="info-box-content">
+                                            All members respond simultaneously with isolated contexts. 
+                                            Responses are independent and uninfluenced by each other.
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="form-group">
+                                    <label>Stage Name</label>
+                                    <input
+                                        type="text"
+                                        value={selectedStage.name}
+                                        onChange={(e) => updateStage(selectedStage.id, { name: e.target.value })}
+                                        disabled={selectedStage.isFinal}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Kind</label>
+                                    <select
+                                        value={selectedStage.kind}
+                                        onChange={(e) => updateStage(selectedStage.id, { kind: e.target.value })}
+                                        disabled={selectedStage.isFinal}
+                                    >
+                                        {STAGE_KINDS.map(kind => (
+                                            <option key={kind.value} value={kind.value}>
+                                                {kind.label} - {kind.description}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Execution Mode</label>
+                                    <select
+                                        value={selectedStage.executionMode}
+                                        onChange={(e) => updateStage(selectedStage.id, { executionMode: e.target.value })}
+                                        disabled={selectedStage.isFinal}
+                                    >
+                                        {EXECUTION_MODES.map(mode => (
+                                            <option key={mode.value} value={mode.value}>
+                                                {mode.label} - {mode.description}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Prompt Template</label>
+                                    <textarea
+                                        value={selectedStage.prompt}
+                                        onChange={(e) => updateStage(selectedStage.id, { prompt: e.target.value })}
+                                        placeholder="Use {question}, {responses}, {stage1}, {stage2}, etc."
+                                    />
+                                    <div className="form-hint">
+                                        Available placeholders: <code>{'{{question}}'}</code>, <code>{'{{responses}}'}</code>, <code>{'{{stage1}}'}</code>, <code>{'{{stage2}}'}</code>, etc.
+                                    </div>
+                                </div>
+                                <div className="role-assignment">
+                                    <h3>
+                                        {selectedStage.isFinal ? 'Synthesis Role (Select 1)' : 'Assigned Roles (Max 6)'}
+                                    </h3>
+                                    <div className="role-lists">
+                                        <div className="role-list-container">
+                                            <div className="role-list-header">
+                                                Assigned
+                                                <span className="role-count">
+                                                    {selectedStage.memberIds.length}/{selectedStage.isFinal ? 1 : 6}
+                                                </span>
+                                            </div>
+                                            {selectedStage.memberIds.length === 0 ? (
+                                                <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--text-3)' }}>
+                                                    No roles assigned
+                                                </div>
+                                            ) : (
+                                                selectedStage.memberIds.map(roleId => {
+                                                    const role = roles.find(r => r.id === roleId);
+                                                    if (!role) return null;
+                                                    return (
+                                                        <div key={roleId} className="role-list-item">
+                                                            <span className="role-list-item-name">{role.name}</span>
+                                                            <button className="btn-sm btn-ghost" onClick={() => assignRoleToStage(selectedStage.id, roleId)}>
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                        <div className="role-list-container">
+                                            <div className="role-list-header">
+                                                Available
+                                                <span className="role-count">
+                                                    {roles.filter(r => !selectedStage.memberIds.includes(r.id)).length}
+                                                </span>
+                                            </div>
+                                            {roles.filter(r => !selectedStage.memberIds.includes(r.id)).length === 0 ? (
+                                                <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--text-3)' }}>
+                                                    All roles assigned
+                                                </div>
+                                            ) : (
+                                                roles.filter(r => !selectedStage.memberIds.includes(r.id)).map(role => (
+                                                    <div key={role.id} className="role-list-item">
+                                                        <span className="role-list-item-name">{role.name}</span>
+                                                        <button className="btn-sm btn-ghost" onClick={() => assignRoleToStage(selectedStage.id, role.id)}>
+                                                            Add
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="empty-state">
+                                <div className="empty-state-icon">←</div>
+                                <p>Select a stage to configure</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function Step3Overview({ stages, roles, validation, onShowJson, exportJson }) {
+            return (
+                <div className="overview-container">
+                    <div className="overview-section">
+                        <h2>
+                            <span className="section-icon">🔄</span>
+                            Pipeline Flow
+                        </h2>
+                        <div className="pipeline-flow">
+                            {stages.map((stage, index) => (
+                                <div key={stage.id} className={`flow-stage ${stage.isFinal ? 'final' : ''}`}>
+                                    <div className="flow-stage-header">
+                                        <div className="flow-stage-title">
+                                            {index + 1}. {stage.name}
+                                        </div>
+                                        <div className="flow-stage-meta">
+                                            <div className={`badge badge-${stage.kind}`}>{stage.kind}</div>
+                                            <div className="badge" style={{ 
+                                                background: stage.executionMode === 'parallel' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                                                color: stage.executionMode === 'parallel' ? 'var(--accent-blue)' : '#a855f7'
+                                            }}>
+                                                {stage.executionMode}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flow-stage-body">
+                                        <div className="flow-roles">
+                                            {stage.memberIds.map(roleId => {
+                                                const role = roles.find(r => r.id === roleId);
+                                                if (!role) return null;
+                                                return (
+                                                    <div key={roleId} className="flow-role-chip">
+                                                        {role.name}
+                                                    </div>
+                                                );
+                                            })}
+                                            {stage.memberIds.length === 0 && (
+                                                <div style={{ color: 'var(--text-3)', fontSize: '13px' }}>
+                                                    No roles assigned
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flow-prompt">
+                                            {stage.prompt.split(/(\{[^}]+\})/g).map((part, i) => 
+                                                part.match(/\{[^}]+\}/) ? (
+                                                    <span key={i} className="prompt-placeholder">{part}</span>
+                                                ) : part
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="overview-section">
+                        <h2>
+                            <span className="section-icon">👥</span>
+                            Roles & Models
+                        </h2>
+                        <div className="roles-summary">
+                            {roles.map(role => (
+                                <div key={role.id} className="role-summary-card">
+                                    <div className="role-summary-name">{role.name}</div>
+                                    <div className="role-summary-model">
+                                        {AVAILABLE_MODELS.find(m => m.id === role.modelId)?.name}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="overview-section">
+                        <h2>
+                            <span className="section-icon">✓</span>
+                            Validation
+                        </h2>
+                        {validation.errors.length === 0 && validation.warnings.length === 0 ? (
+                            <div className="validation-item success">
+                                <div className="validation-icon">✓</div>
+                                <div className="validation-content">
+                                    <div className="validation-title">All checks passed</div>
+                                    <div className="validation-message">
+                                        Your configuration is valid and ready to save.
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {validation.errors.map((error, i) => (
+                                    <div key={`error-${i}`} className="validation-item error">
+                                        <div className="validation-icon">✕</div>
+                                        <div className="validation-content">
+                                            <div className="validation-title">{error.title}</div>
+                                            <div className="validation-message">{error.message}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {validation.warnings.map((warning, i) => (
+                                    <div key={`warning-${i}`} className="validation-item warning">
+                                        <div className="validation-icon">⚠</div>
+                                        <div className="validation-content">
+                                            <div className="validation-title">{warning.title}</div>
+                                            <div className="validation-message">{warning.message}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
+                        )}
+                        <div className="action-bar">
+                            <button className="btn btn-secondary" onClick={onShowJson}>
+                                View Settings JSON
+                            </button>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={() => {
+                                    const json = JSON.stringify(exportJson(), null, 2);
+                                    const blob = new Blob([json], { type: 'application/json' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = 'council-config.json';
+                                    a.click();
+                                }}
+                            >
+                                Export Configuration
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function JsonModal({ json, onClose }) {
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <div className="modal-title">Configuration JSON</div>
+                            <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <pre className="code-block">{JSON.stringify(json, null, 2)}</pre>
+                        </div>
+                        <div className="modal-footer">
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(json, null, 2));
+                                    alert('Copied to clipboard!');
+                                }}
+                            >
+                                Copy to Clipboard
+                            </button>
+                            <button className="btn btn-primary" onClick={onClose}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<CouncilEditor />, document.getElementById('root'));
+    </script>
+</body>
+</html>
