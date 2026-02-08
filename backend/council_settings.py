@@ -13,6 +13,8 @@ from .config import (
     CHAIRMAN_MODEL,
     CHAIRMAN_ALIAS,
     TITLE_MODEL,
+    DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
+    MAX_MEMBER_MAX_OUTPUT_TOKENS,
     resolve_model_for_region,
     DEFAULT_SPEAKER_CONTEXT_LEVEL,
 )
@@ -74,6 +76,16 @@ Your task as Chairman is to synthesize all of this information into a single, co
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
 _SETTINGS: Dict[str, Any] | None = None
+
+
+def _normalize_member_max_output_tokens(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
+    if parsed < 1:
+        return DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
+    return min(parsed, MAX_MEMBER_MAX_OUTPUT_TOKENS)
 
 
 def _now_iso() -> str:
@@ -324,6 +336,7 @@ def _default_settings() -> Dict[str, Any]:
                 "alias": alias,
                 "model_id": model_id,
                 "system_prompt": "",
+                "max_output_tokens": DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
             }
         )
 
@@ -354,6 +367,10 @@ def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     for member in members:
         if "system_prompt" not in member:
             member["system_prompt"] = ""
+            changed = True
+        normalized_max_tokens = _normalize_member_max_output_tokens(member.get("max_output_tokens"))
+        if member.get("max_output_tokens") != normalized_max_tokens:
+            member["max_output_tokens"] = normalized_max_tokens
             changed = True
     if "use_system_prompt_stage2" not in settings:
         settings["use_system_prompt_stage2"] = True

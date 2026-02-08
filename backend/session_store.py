@@ -34,7 +34,7 @@ def ensure_session(session_id: str | None) -> Tuple[str, bool]:
             return session_id, False
 
     new_id = secrets.token_urlsafe(24)
-    _SESSIONS[new_id] = {"last_seen": now, "bedrock_key": None}
+    _SESSIONS[new_id] = {"last_seen": now, "bedrock_key": None, "aws_profile": None}
     return new_id, True
 
 
@@ -57,4 +57,28 @@ def set_bedrock_key(session_id: str, key: str) -> None:
         session_id, _ = ensure_session(session_id)
         session = _SESSIONS[session_id]
     session["bedrock_key"] = key
+    _touch(session, _now())
+
+
+def get_aws_profile(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    session = _SESSIONS.get(session_id)
+    if not session:
+        return None
+    if _is_expired(session, _now()):
+        _SESSIONS.pop(session_id, None)
+        return None
+    _touch(session, _now())
+    profile = (session.get("aws_profile") or "").strip()
+    return profile or None
+
+
+def set_aws_profile(session_id: str, profile: str | None) -> None:
+    session = _SESSIONS.get(session_id)
+    if not session:
+        session_id, _ = ensure_session(session_id)
+        session = _SESSIONS[session_id]
+    next_profile = (profile or "").strip() or None
+    session["aws_profile"] = next_profile
     _touch(session, _now())

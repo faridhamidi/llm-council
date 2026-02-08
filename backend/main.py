@@ -22,8 +22,12 @@ from .config import (
     MAX_FOLLOW_UP_MESSAGES,
     MAX_CHAT_MESSAGES,
     SPEAKER_CONTEXT_LEVELS,
+    DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
+    MAX_MEMBER_MAX_OUTPUT_TOKENS,
 )
 from .openrouter import check_bedrock_connection
+from .openrouter import validate_bedrock_model_ids
+from .openrouter import list_local_aws_profiles
 from .council_settings import (
     get_settings,
     update_settings,
@@ -80,18 +84,106 @@ def _get_session_bedrock_token(request: Request) -> str | None:
     return session_store.get_bedrock_key(session_id)
 
 
+def _get_session_aws_profile(request: Request) -> str | None:
+    """Return session-scoped AWS profile override (if set)."""
+    session_id = request.state.session_id
+    return session_store.get_aws_profile(session_id)
+
+
 def _calculate_chat_remaining(messages: List[Dict[str, Any]]) -> int:
     user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
     return max(0, MAX_CHAT_MESSAGES - user_message_count)
 
 
-async def _safe_generate_title(message: str, api_key: str | None = None) -> str:
+async def _safe_generate_title(
+    message: str,
+    api_key: str | None = None,
+    aws_profile: str | None = None,
+) -> str:
     """Best-effort title generation that never breaks the response flow."""
     try:
-        return await generate_conversation_title(message, api_key=api_key)
+        return await generate_conversation_title(message, api_key=api_key, aws_profile=aws_profile)
     except Exception as exc:
         print(f"Title generation failed: {exc}")
         return "New Conversation"
+
+
+def _collect_startup_model_ids(settings: Dict[str, Any], mode: str) -> List[str]:
+    """Collect the model IDs needed to start a new conversation run."""
+    members = settings.get("members", []) or []
+    member_by_id = {
+        (member.get("id") or "").strip(): (member.get("model_id") or "").strip()
+        for member in members
+    }
+
+    def _chairman_model() -> str:
+        chairman_id = (settings.get("chairman_id") or "").strip()
+        if chairman_id and member_by_id.get(chairman_id):
+            return member_by_id[chairman_id]
+        for member in members:
+            model_id = (member.get("model_id") or "").strip()
+            if model_id:
+                return model_id
+        return ""
+
+    model_ids: List[str] = []
+    if mode == "chat":
+        chair = _chairman_model()
+        if chair:
+            model_ids.append(chair)
+    else:
+        stages = settings.get("stages") or build_default_stages(members, settings.get("chairman_id"))
+        for stage in stages:
+            for member_id in stage.get("member_ids", []) or []:
+                model_id = member_by_id.get((member_id or "").strip(), "")
+                if model_id:
+                    model_ids.append(model_id)
+        if not model_ids:
+            # Safety fallback if stages are malformed.
+            model_ids.extend([
+                (member.get("model_id") or "").strip()
+                for member in members
+                if (member.get("model_id") or "").strip()
+            ])
+
+    # Include title model on first message preflight; it should never block output, but this
+    # makes invalid title model IDs visible immediately.
+    title_model = (settings.get("title_model_id") or "").strip()
+    if title_model:
+        model_ids.append(title_model)
+
+    deduped: List[str] = []
+    seen = set()
+    for model_id in model_ids:
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        deduped.append(model_id)
+    return deduped
+
+
+async def _validate_startup_models_or_raise(
+    settings: Dict[str, Any],
+    mode: str,
+    api_key: str | None = None,
+    aws_profile: str | None = None,
+) -> None:
+    model_ids = _collect_startup_model_ids(settings, mode)
+    if not model_ids:
+        raise HTTPException(status_code=400, detail="No model configured for this conversation.")
+
+    validation = await validate_bedrock_model_ids(model_ids, api_key=api_key, aws_profile=aws_profile)
+    invalid_models = validation.get("invalid_models", []) or []
+    if invalid_models:
+        region = validation.get("region") or get_bedrock_region()
+        invalid_list = ", ".join(invalid_models)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid Bedrock model configuration for region {region}: {invalid_list}. "
+                "Update Council Settings or switch Bedrock region."
+            ),
+        )
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -187,6 +279,11 @@ class UpdateBedrockRegionRequest(BaseModel):
     region: str
 
 
+class UpdateAwsProfileRequest(BaseModel):
+    """Request to set a session-scoped AWS profile for SSO credentials."""
+    profile: str | None = None
+
+
 class AuthPinRequest(BaseModel):
     """Request to set the access PIN."""
     pin: str
@@ -204,6 +301,7 @@ class CouncilMemberConfig(BaseModel):
     alias: str
     model_id: str
     system_prompt: str | None = ""
+    max_output_tokens: int = DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
 
 
 class CouncilStageConfig(BaseModel):
@@ -222,6 +320,7 @@ class CouncilSettingsRequest(BaseModel):
     title_model_id: str
     use_system_prompt_stage2: bool = True
     use_system_prompt_stage3: bool = True
+    speaker_context_level: str = "full"
     stages: List[CouncilStageConfig] | None = None
 
 
@@ -363,6 +462,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     is_first_message = len(conversation["messages"]) == 0
 
     bedrock_key = _get_session_bedrock_token(http_request)
+    bedrock_profile = _get_session_aws_profile(http_request)
 
     if conversation_mode == "chat":
         current_user_messages = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
@@ -371,6 +471,15 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
                 status_code=400,
                 detail=f"Message limit reached. Maximum {MAX_CHAT_MESSAGES} messages allowed in chat mode.",
             )
+
+    if is_first_message:
+        settings_for_start = conversation.get("settings_snapshot") or get_settings()
+        await _validate_startup_models_or_raise(
+            settings_for_start,
+            conversation_mode,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
 
     # Estimate tokens for user message
     user_token_count = estimate_token_count(payload.content)
@@ -386,7 +495,11 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         settings = conversation.get("settings_snapshot") or get_settings()
         if is_first_message and not conversation.get("settings_snapshot"):
             storage.save_settings_snapshot(conversation_id, settings)
-            title = await _safe_generate_title(payload.content, api_key=bedrock_key)
+            title = await _safe_generate_title(
+                payload.content,
+                api_key=bedrock_key,
+                aws_profile=bedrock_profile,
+            )
             storage.update_conversation_title(conversation_id, title)
 
         chat_response = await query_normal_chat(
@@ -394,6 +507,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             conversation.get("messages", []),
             settings,
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
         )
 
         storage.add_speaker_message(
@@ -419,7 +533,11 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         
         # Generate title in parallel if first message
         if is_first_message:
-            title = await _safe_generate_title(payload.content, api_key=bedrock_key)
+            title = await _safe_generate_title(
+                payload.content,
+                api_key=bedrock_key,
+                aws_profile=bedrock_profile,
+            )
             storage.update_conversation_title(conversation_id, title)
             # Use current settings
             settings = get_settings()
@@ -432,6 +550,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         stages, metadata = await run_full_council(
             payload.content,
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
             settings=settings,
             conversation_messages=messages[:-1] if not is_first_message else None # Exclude the very last message if it's the trigger? 
             # Actually, standard is to include history UP TO the current prompt. 
@@ -491,6 +610,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             conversation["messages"], # This includes the new user message
             settings,
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
         )
         
         # Add speaker message
@@ -556,6 +676,7 @@ async def retry_message(conversation_id: str, http_request: Request):
     
     # Use the send_message logic but skip adding the user message
     bedrock_key = _get_session_bedrock_token(http_request)
+    bedrock_profile = _get_session_aws_profile(http_request)
     
     # Refresh conversation
     conversation = storage.get_conversation(conversation_id)
@@ -568,6 +689,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             conversation.get("messages", []),
             settings,
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
         )
 
         storage.add_speaker_message(
@@ -607,6 +729,7 @@ async def retry_message(conversation_id: str, http_request: Request):
         stages, metadata = await run_full_council(
             last_user_msg.get("content", ""),
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
             settings=settings,
             conversation_messages=history,
         )
@@ -634,6 +757,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             conversation["messages"],
             settings,
             api_key=bedrock_key,
+            aws_profile=bedrock_profile,
         )
         
         storage.add_speaker_message(
@@ -736,8 +860,32 @@ async def update_bedrock_token(payload: UpdateBedrockTokenRequest, http_request:
 async def get_bedrock_connection_status(http_request: Request):
     """Return Bedrock credential status for UI diagnostics."""
     session_token = _get_session_bedrock_token(http_request)
-    status = await check_bedrock_connection(api_key=session_token)
+    session_profile = _get_session_aws_profile(http_request)
+    status = await check_bedrock_connection(api_key=session_token, aws_profile=session_profile)
+    status["session_profile"] = session_profile
     return status
+
+
+@app.get("/api/settings/aws-profile")
+async def get_aws_profile_setting(http_request: Request):
+    """Return session-scoped AWS profile and available local profile names."""
+    session_profile = _get_session_aws_profile(http_request)
+    return {
+        "profile": session_profile or "",
+        "available_profiles": list_local_aws_profiles(),
+    }
+
+
+@app.post("/api/settings/aws-profile")
+async def update_aws_profile(payload: UpdateAwsProfileRequest, http_request: Request):
+    """
+    Set or clear session-scoped AWS profile.
+    Empty profile clears session override and falls back to env/default resolution.
+    """
+    profile = (payload.profile or "").strip()
+    session_id = http_request.state.session_id
+    session_store.set_aws_profile(session_id, profile or None)
+    return {"status": "ok", "profile": profile}
 
 
 @app.get("/api/settings/bedrock-region")
@@ -811,6 +959,11 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
         if member.model_id not in allowed_models:
             errors.append(f"Unsupported model for region: {member.model_id}")
             break
+        if member.max_output_tokens < 1 or member.max_output_tokens > MAX_MEMBER_MAX_OUTPUT_TOKENS:
+            errors.append(
+                f"max_output_tokens for {member.alias} must be between 1 and {MAX_MEMBER_MAX_OUTPUT_TOKENS}."
+            )
+            break
         prompt_value = member.system_prompt or ""
         if len(prompt_value) > MAX_SYSTEM_PROMPT_CHARS:
             errors.append(f"System prompt too long for {member.alias}.")
@@ -818,6 +971,8 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
 
     if payload.title_model_id not in allowed_models:
         errors.append(f"Unsupported title model for region: {payload.title_model_id}")
+    if payload.speaker_context_level not in SPEAKER_CONTEXT_LEVELS:
+        errors.append("Invalid chairman context level.")
 
     stages = (
         [stage.model_dump() for stage in payload.stages]
@@ -915,6 +1070,7 @@ async def update_council_settings(request: CouncilSettingsRequest):
         "title_model_id": request.title_model_id,
         "use_system_prompt_stage2": request.use_system_prompt_stage2,
         "use_system_prompt_stage3": request.use_system_prompt_stage3,
+        "speaker_context_level": request.speaker_context_level,
         "stages": stages,
     }
 
@@ -964,6 +1120,8 @@ async def apply_council_preset(request: CouncilPresetApplyRequest):
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
 
+    settings = payload.model_dump()
+    settings["max_members"] = MAX_COUNCIL_MEMBERS
     update_settings(settings)
     return {"status": "ok", "settings": settings, "preset": {"id": preset["id"], "name": preset["name"]}}
 
@@ -998,6 +1156,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
     is_first_message = len(conversation["messages"]) == 0
 
     bedrock_key = _get_session_bedrock_token(http_request)
+    bedrock_profile = _get_session_aws_profile(http_request)
 
     if conversation_mode == "chat":
         user_message_count = sum(1 for msg in conversation.get("messages", []) if msg.get("role") == "user")
@@ -1006,6 +1165,15 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 status_code=400,
                 detail=f"Message limit reached. Maximum {MAX_CHAT_MESSAGES} messages allowed in chat mode.",
             )
+
+    if is_first_message:
+        settings_for_start = conversation.get("settings_snapshot") or get_settings()
+        await _validate_startup_models_or_raise(
+            settings_for_start,
+            conversation_mode,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
 
     async def stream_worker(event_queue: "asyncio.Queue[Dict[str, Any]]", cancel_event: asyncio.Event):
         try:
@@ -1022,15 +1190,26 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 settings = conversation_snapshot.get("settings_snapshot") or get_settings()
                 if is_first_message and not conversation_snapshot.get("settings_snapshot"):
                     storage.save_settings_snapshot(conversation_id, settings)
-                    title = await _safe_generate_title(request.content, api_key=bedrock_key)
+                    title = await _safe_generate_title(
+                        request.content,
+                        api_key=bedrock_key,
+                        aws_profile=bedrock_profile,
+                    )
                     storage.update_conversation_title(conversation_id, title)
                     await event_queue.put({"type": "title_complete", "data": {"title": title}})
+
+                async def on_chat_delta(delta: str) -> None:
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    await event_queue.put({"type": "speaker_delta", "data": {"delta": delta}})
 
                 chat_response = await query_normal_chat(
                     request.content,
                     conversation_snapshot.get("messages", []),
                     settings,
                     api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
+                    on_token_delta=on_chat_delta,
                 )
 
                 storage.add_speaker_message(
@@ -1056,7 +1235,13 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     storage.save_settings_snapshot(conversation_id, current_settings)
                     
                     # Start title generation in parallel (don't await yet)
-                    title_task = asyncio.create_task(_safe_generate_title(request.content, api_key=bedrock_key))
+                    title_task = asyncio.create_task(
+                        _safe_generate_title(
+                            request.content,
+                            api_key=bedrock_key,
+                            aws_profile=bedrock_profile,
+                        )
+                    )
                 else:
                     conversation_snapshot = storage.get_conversation(conversation_id) or {}
                     current_settings = conversation_snapshot.get("settings_snapshot") or get_settings()
@@ -1072,6 +1257,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     if cancel_event.is_set():
                         raise asyncio.CancelledError()
 
+                async def on_stage_delta(delta_entry: Dict[str, Any]) -> None:
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    await event_queue.put({"type": "stage_member_delta", "data": delta_entry})
+
                 # Get history for reconvening
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
                 messages = conversation_snapshot.get("messages", [])
@@ -1083,9 +1273,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 stages, _ = await run_full_council(
                     request.content,
                     api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
                     settings=current_settings,
                     on_stage_start=on_stage_start,
                     on_stage_complete=on_stage_complete,
+                    on_stage_delta=on_stage_delta,
                     conversation_messages=history,
                 )
 
@@ -1117,11 +1309,18 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
                 settings = conversation_snapshot.get("settings_snapshot") or get_settings()
 
+                async def on_speaker_delta(delta: str) -> None:
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    await event_queue.put({"type": "speaker_delta", "data": {"delta": delta}})
+
                 speaker_response = await query_council_speaker(
                     request.content,
                     conversation_snapshot.get("messages", []),
                     settings,
                     api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
+                    on_token_delta=on_speaker_delta,
                 )
 
                 storage.add_speaker_message(

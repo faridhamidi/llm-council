@@ -1,12 +1,29 @@
 """LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple, Callable, Awaitable
+from typing import List, Dict, Any, Tuple, Callable, Awaitable, Optional
 import asyncio
 
-from .openrouter import query_model
+from .openrouter import query_model, query_model_stream
 from .council_settings import get_settings, build_default_stages, DEFAULT_STAGE2_PROMPT, DEFAULT_STAGE3_PROMPT
+from .config import (
+    DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
+    MAX_MEMBER_MAX_OUTPUT_TOKENS,
+    CHAT_MODE_MAX_OUTPUT_TOKENS,
+)
 
 StageEventHandler = Callable[[Dict[str, Any]], Awaitable[None]]
+TokenDeltaHandler = Callable[[str], Awaitable[None]]
+StageMemberDeltaHandler = Callable[[int, Dict[str, Any], str], Awaitable[None]]
+
+
+def _member_max_output_tokens(member: Dict[str, Any]) -> int:
+    try:
+        value = int(member.get("max_output_tokens", DEFAULT_MEMBER_MAX_OUTPUT_TOKENS))
+    except (TypeError, ValueError):
+        return DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
+    if value < 1:
+        return DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
+    return min(value, MAX_MEMBER_MAX_OUTPUT_TOKENS)
 
 
 def _council_config() -> Tuple[
@@ -143,10 +160,12 @@ async def _collect_stage_responses(
     execution_mode: str,
     prior_context: str | None,
     api_key: str | None,
+    aws_profile: str | None = None,
     prior_results: List[Dict[str, Any]] | None = None,
     responses_context: List[Dict[str, Any]] | None = None,
     rankings_context: List[Dict[str, Any]] | None = None,
     conversation_history: str | None = None,
+    on_member_delta: StageMemberDeltaHandler | None = None,
 ) -> List[Dict[str, Any]]:
     response_count = len(prior_results) if prior_results else 0
     response_labels = ", ".join([
@@ -171,17 +190,41 @@ async def _collect_stage_responses(
     )
     messages = [{"role": "user", "content": prompt_text}]
     tasks = []
+
+    async def _query_member(
+        member_index: int,
+        member: Dict[str, Any],
+        member_messages: List[Dict[str, str]],
+    ) -> Optional[Dict[str, Any]]:
+        if on_member_delta:
+            async def _emit_delta(delta: str) -> None:
+                await on_member_delta(member_index, member, delta)
+
+            return await query_model_stream(
+                member["model_id"],
+                member_messages,
+                system_prompt=member.get("system_prompt", ""),
+                api_key=api_key,
+                aws_profile=aws_profile,
+                max_output_tokens=_member_max_output_tokens(member),
+                on_delta=_emit_delta,
+            )
+
+        return await query_model(
+            member["model_id"],
+            member_messages,
+            system_prompt=member.get("system_prompt", ""),
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=_member_max_output_tokens(member),
+        )
+
     if execution_mode == "sequential":
         responses = []
         running_messages = list(messages)
         followup_prompt = "Please respond to the original prompt above, considering any prior members' responses."
         for index, member in enumerate(members):
-            response = await query_model(
-                member["model_id"],
-                running_messages,
-                system_prompt=member.get("system_prompt", ""),
-                api_key=api_key,
-            )
+            response = await _query_member(index, member, running_messages)
             responses.append(response)
             content = response.get("content") if response else None
             if content:
@@ -197,13 +240,8 @@ async def _collect_stage_responses(
                     })
     else:
         tasks = [
-            query_model(
-                member["model_id"],
-                messages,
-                system_prompt=member.get("system_prompt", ""),
-                api_key=api_key,
-            )
-            for member in members
+            _query_member(member_index, member, messages)
+            for member_index, member in enumerate(members)
         ]
         responses = await asyncio.gather(*tasks)
 
@@ -212,11 +250,13 @@ async def _collect_stage_responses(
         model_id = member.get("model_id", "")
         content = response.get("content") if response else None
         if content:
+            partial_error = response.get("error") if response else None
             results.append({
                 "model": member.get("alias", model_id),
                 "response": content,
                 "status": "ok",
                 "system_prompt_dropped": bool(response.get("system_prompt_dropped")),
+                "stream_error": partial_error if response.get("partial") else None,
             })
         else:
             results.append({
@@ -233,10 +273,12 @@ async def collect_rankings(
     user_query: str,
     responses: List[Dict[str, Any]],
     api_key: str | None = None,
+    aws_profile: str | None = None,
     stage_prompt: str | None = None,
     execution_mode: str = "parallel",
     stage_members: List[Dict[str, Any]] | None = None,
     conversation_history: str | None = None,
+    on_member_delta: StageMemberDeltaHandler | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Each model ranks the anonymized responses.
@@ -297,17 +339,42 @@ async def collect_rankings(
     members, _, _, _, _, use_stage2_prompt, _ = _council_config()
     if stage_members is not None:
         members = stage_members
+
+    async def _query_member(
+        member_index: int,
+        member: Dict[str, Any],
+        member_messages: List[Dict[str, str]],
+    ) -> Optional[Dict[str, Any]]:
+        member_prompt = member.get("system_prompt", "") if use_stage2_prompt else None
+        if on_member_delta:
+            async def _emit_delta(delta: str) -> None:
+                await on_member_delta(member_index, member, delta)
+
+            return await query_model_stream(
+                member["model_id"],
+                member_messages,
+                system_prompt=member_prompt,
+                api_key=api_key,
+                aws_profile=aws_profile,
+                max_output_tokens=_member_max_output_tokens(member),
+                on_delta=_emit_delta,
+            )
+
+        return await query_model(
+            member["model_id"],
+            member_messages,
+            system_prompt=member_prompt,
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=_member_max_output_tokens(member),
+        )
+
     if execution_mode == "sequential":
         responses = []
         running_messages = list(messages)
         followup_prompt = "Please rank the responses using the original prompt above, considering any prior members' rankings."
         for index, member in enumerate(members):
-            response = await query_model(
-                member["model_id"],
-                running_messages,
-                system_prompt=member.get("system_prompt", "") if use_stage2_prompt else None,
-                api_key=api_key,
-            )
+            response = await _query_member(index, member, running_messages)
             responses.append(response)
             content = response.get("content") if response else None
             if content:
@@ -323,13 +390,8 @@ async def collect_rankings(
                     })
     else:
         tasks = [
-            query_model(
-                member["model_id"],
-                messages,
-                system_prompt=member.get("system_prompt", "") if use_stage2_prompt else None,
-                api_key=api_key,
-            )
-            for member in members
+            _query_member(member_index, member, messages)
+            for member_index, member in enumerate(members)
         ]
         responses = await asyncio.gather(*tasks)
 
@@ -342,7 +404,8 @@ async def collect_rankings(
             rankings_results.append({
                 "model": member.get("alias", member.get("model_id", "")),
                 "ranking": full_text,
-                "parsed_ranking": parsed
+                "parsed_ranking": parsed,
+                "stream_error": response.get("error") if response.get("partial") else None,
             })
 
     return rankings_results, label_to_model
@@ -353,9 +416,11 @@ async def synthesize_final(
     responses: List[Dict[str, Any]],
     rankings: List[Dict[str, Any]],
     api_key: str | None = None,
+    aws_profile: str | None = None,
     stage_prompt: str | None = None,
     stage_members: List[Dict[str, Any]] | None = None,
     conversation_history: str | None = None,
+    on_member_delta: StageMemberDeltaHandler | None = None,
 ) -> Dict[str, Any]:
     """
     Chairman synthesizes final response.
@@ -407,16 +472,34 @@ async def synthesize_final(
         chairman_model_id = stage_members[0].get("model_id", chairman_model_id)
         chairman_label = stage_members[0].get("alias", chairman_label)
     chairman_prompt_text = ""
+    chairman_max_tokens = DEFAULT_MEMBER_MAX_OUTPUT_TOKENS
     for member in members:
         if member.get("model_id") == chairman_model_id:
             chairman_prompt_text = member.get("system_prompt", "")
+            chairman_max_tokens = _member_max_output_tokens(member)
             break
-    response = await query_model(
-        chairman_model_id,
-        messages,
-        system_prompt=chairman_prompt_text if use_stage3_prompt else None,
-        api_key=api_key,
-    )
+    if on_member_delta:
+        async def _emit_delta(delta: str) -> None:
+            await on_member_delta(0, {"alias": chairman_label, "model_id": chairman_model_id}, delta)
+
+        response = await query_model_stream(
+            chairman_model_id,
+            messages,
+            system_prompt=chairman_prompt_text if use_stage3_prompt else None,
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=chairman_max_tokens,
+            on_delta=_emit_delta,
+        )
+    else:
+        response = await query_model(
+            chairman_model_id,
+            messages,
+            system_prompt=chairman_prompt_text if use_stage3_prompt else None,
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=chairman_max_tokens,
+        )
 
     if response is None or not response.get("content"):
         # Fallback if chairman fails
@@ -427,7 +510,8 @@ async def synthesize_final(
 
     return {
         "model": chairman_label,
-        "response": response.get('content', '')
+        "response": response.get('content', ''),
+        "stream_error": response.get("error") if response.get("partial") else None,
     }
 
 
@@ -512,7 +596,11 @@ def calculate_aggregate_rankings(
     return aggregate
 
 
-async def generate_conversation_title(user_query: str, api_key: str | None = None) -> str:
+async def generate_conversation_title(
+    user_query: str,
+    api_key: str | None = None,
+    aws_profile: str | None = None,
+) -> str:
     """
     Generate a short title for a conversation based on the first user message.
 
@@ -534,7 +622,14 @@ Title:"""
     # Use gemini-2.5-flash for title generation (fast and cheap)
     members, _, chairman_model_id, _, title_model_id, _, _ = _council_config()
     fallback_model = chairman_model_id or (members[0]["model_id"] if members else "")
-    response = await query_model(title_model_id or fallback_model, messages, timeout=30.0, api_key=api_key)
+    response = await query_model(
+        title_model_id or fallback_model,
+        messages,
+        timeout=30.0,
+        api_key=api_key,
+        aws_profile=aws_profile,
+        max_output_tokens=256,
+    )
 
     if response is None or not response.get("content"):
         # Fallback to a generic title
@@ -582,9 +677,11 @@ def get_final_response(stages: List[Dict[str, Any]]) -> Dict[str, Any]:
 async def run_full_council(
     user_query: str,
     api_key: str | None = None,
+    aws_profile: str | None = None,
     settings: Dict[str, Any] | None = None,
     on_stage_start: StageEventHandler | None = None,
     on_stage_complete: StageEventHandler | None = None,
+    on_stage_delta: StageEventHandler | None = None,
     conversation_messages: List[Dict[str, Any]] | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -627,15 +724,34 @@ async def run_full_council(
         if on_stage_start:
             await on_stage_start(dict(stage_entry))
 
+        async def _emit_stage_member_delta(
+            member_index: int,
+            member: Dict[str, Any],
+            delta: str,
+        ) -> None:
+            if not on_stage_delta or not delta:
+                return
+            await on_stage_delta({
+                "index": stage_entry["index"],
+                "id": stage_entry["id"],
+                "name": stage_entry["name"],
+                "kind": stage_kind,
+                "member_index": member_index,
+                "member": member.get("alias", member.get("model_id", "Member")),
+                "delta": delta,
+            })
+
         if stage_kind == "rankings":
             rankings_results, label_to_model = await collect_rankings(
                 user_query,
                 last_responses,
                 api_key=api_key,
+                aws_profile=aws_profile,
                 stage_prompt=stage_prompt,
                 execution_mode=execution_mode,
                 stage_members=stage_members if stage_members else None,
                 conversation_history=history_text,
+                on_member_delta=_emit_stage_member_delta if on_stage_delta else None,
             )
             aggregate_rankings = calculate_aggregate_rankings(rankings_results, label_to_model)
             metadata["label_to_model"] = label_to_model
@@ -652,9 +768,11 @@ async def run_full_council(
                 last_responses,
                 last_rankings,
                 api_key=api_key,
+                aws_profile=aws_profile,
                 stage_prompt=stage_prompt,
                 stage_members=stage_members if stage_members else None,
                 conversation_history=history_text,
+                on_member_delta=_emit_stage_member_delta if on_stage_delta else None,
             )
             stage_entry.update({"results": synthesis_result})
         else:
@@ -666,10 +784,12 @@ async def run_full_council(
                 execution_mode,
                 prior_context,
                 api_key,
+                aws_profile=aws_profile,
                 prior_results=last_responses,
                 responses_context=last_responses,
                 rankings_context=last_rankings,
                 conversation_history=history_text,
+                on_member_delta=_emit_stage_member_delta if on_stage_delta else None,
             )
             last_responses = responses_results
             stage_entry.update({"results": responses_results})
@@ -853,6 +973,8 @@ async def query_normal_chat(
     conversation_messages: List[Dict[str, Any]],
     settings: Dict[str, Any],
     api_key: str | None = None,
+    aws_profile: str | None = None,
+    on_token_delta: TokenDeltaHandler | None = None,
 ) -> Dict[str, Any]:
     """
     Query a single model for normal chat mode (no council pipeline).
@@ -876,12 +998,25 @@ async def query_normal_chat(
     if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_query:
         messages.append({"role": "user", "content": user_query})
 
-    response = await query_model(
-        model_id,
-        messages,
-        system_prompt=system_prompt,
-        api_key=api_key,
-    )
+    if on_token_delta:
+        response = await query_model_stream(
+            model_id,
+            messages,
+            system_prompt=system_prompt,
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=CHAT_MODE_MAX_OUTPUT_TOKENS,
+            on_delta=on_token_delta,
+        )
+    else:
+        response = await query_model(
+            model_id,
+            messages,
+            system_prompt=system_prompt,
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=CHAT_MODE_MAX_OUTPUT_TOKENS,
+        )
 
     if response is None:
         return {
@@ -891,7 +1026,7 @@ async def query_normal_chat(
             "error": True,
         }
 
-    if response.get("error"):
+    if response.get("error") and not response.get("content"):
         return {
             "model": model_label,
             "response": f"Bedrock Error: {response.get('error')}",
@@ -914,6 +1049,7 @@ async def query_normal_chat(
         "response": text,
         "token_count": estimate_token_count(text) + (history_chars // 20),
         "error": False,
+        "stream_error": response.get("error") if response.get("partial") else None,
     }
 
 
@@ -922,6 +1058,8 @@ async def query_council_speaker(
     conversation_messages: List[Dict[str, Any]],
     settings: Dict[str, Any],
     api_key: str | None = None,
+    aws_profile: str | None = None,
+    on_token_delta: TokenDeltaHandler | None = None,
 ) -> Dict[str, Any]:
     """
     Query the council speaker for a follow-up response.
@@ -981,12 +1119,25 @@ Provide a helpful, accurate response:"""
     messages = [{"role": "user", "content": chairman_prompt}]
     
     try:
-        response = await query_model(
-            chairman_model_id,
-            messages,
-            system_prompt=chairman_system_prompt if chairman_system_prompt else None,
-            api_key=api_key,
-        )
+        if on_token_delta:
+            response = await query_model_stream(
+                chairman_model_id,
+                messages,
+                system_prompt=chairman_system_prompt if chairman_system_prompt else None,
+                api_key=api_key,
+                aws_profile=aws_profile,
+                max_output_tokens=_member_max_output_tokens(chairman_member),
+                on_delta=on_token_delta,
+            )
+        else:
+            response = await query_model(
+                chairman_model_id,
+                messages,
+                system_prompt=chairman_system_prompt if chairman_system_prompt else None,
+                api_key=api_key,
+                aws_profile=aws_profile,
+                max_output_tokens=_member_max_output_tokens(chairman_member),
+            )
 
         if response is None:
             return {
@@ -996,7 +1147,7 @@ Provide a helpful, accurate response:"""
                 "error": True,
             }
 
-        if response.get("error"):
+        if response.get("error") and not response.get("content"):
             return {
                 "model": chairman_label,
                 "response": f"Bedrock Error: {response.get('error')}",
@@ -1019,6 +1170,7 @@ Provide a helpful, accurate response:"""
             "model": chairman_label,
             "response": response_text,
             "token_count": token_count,
+            "stream_error": response.get("error") if response.get("partial") else None,
         }
     
     except Exception as e:

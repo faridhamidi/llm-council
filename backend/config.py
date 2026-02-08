@@ -33,6 +33,30 @@ def set_bedrock_region(region: str) -> None:
 def get_bedrock_runtime_url() -> str:
     return f"https://bedrock-runtime.{_AWS_REGION}.amazonaws.com"
 
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# Council member default output cap (per request). Can be tuned in Council Studio per member.
+DEFAULT_MEMBER_MAX_OUTPUT_TOKENS = _int_env("DEFAULT_MEMBER_MAX_OUTPUT_TOKENS", 10000)
+
+# Upper safety bound for per-member output cap configured in settings.
+MAX_MEMBER_MAX_OUTPUT_TOKENS = _int_env("MAX_MEMBER_MAX_OUTPUT_TOKENS", 20000)
+
+# Chat mode uses a higher fixed default.
+CHAT_MODE_MAX_OUTPUT_TOKENS = _int_env("CHAT_MODE_MAX_OUTPUT_TOKENS", 20000)
+
+# Fallback output cap when a call-site does not provide explicit max tokens.
+BEDROCK_MAX_OUTPUT_TOKENS = _int_env("BEDROCK_MAX_OUTPUT_TOKENS", CHAT_MODE_MAX_OUTPUT_TOKENS)
+
 # Converse-capable Bedrock model families (curated list).
 CONVERSE_MODEL_FAMILIES = [
     {

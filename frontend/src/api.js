@@ -379,6 +379,38 @@ export const api = {
   },
 
   /**
+   * Get session-scoped AWS profile and available local profiles.
+   */
+  async getAwsProfile() {
+    const response = await apiFetch('/api/settings/aws-profile', {
+      headers: withAuth(),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to load AWS profile');
+    }
+    return response.json();
+  },
+
+  /**
+   * Set or clear the session-scoped AWS profile used for SSO calls.
+   */
+  async updateAwsProfile(profile) {
+    const response = await apiFetch('/api/settings/aws-profile', {
+      method: 'POST',
+      headers: withAuth({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ profile: profile ?? '' }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to update AWS profile');
+    }
+    return response.json();
+  },
+
+  /**
    * Get current Bedrock region.
    */
   async getBedrockRegion() {

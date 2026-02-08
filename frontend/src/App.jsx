@@ -167,6 +167,66 @@ function App() {
     return nextStages;
   };
 
+  const applyStageMemberDelta = (message, stageDelta = {}) => {
+    const stageKind = stageDelta.kind || 'responses';
+    const stageStub = {
+      index: stageDelta.index,
+      id: stageDelta.id,
+      name: stageDelta.name,
+      kind: stageKind,
+      status: 'running',
+    };
+    const nextStages = upsertStage(message.stages, stageStub);
+    const stageIndex = stageDelta.index ?? nextStages.findIndex((stage) => stage.id === stageDelta.id);
+    if (stageIndex === undefined || stageIndex === null || stageIndex < 0) {
+      return { ...message, stages: nextStages };
+    }
+
+    const stage = { ...(nextStages[stageIndex] || {}), ...stageStub };
+    const deltaText = stageDelta.delta || '';
+    const memberIndex = stageDelta.member_index ?? 0;
+    const memberName = stageDelta.member || `Member ${memberIndex + 1}`;
+
+    if (stageKind === 'synthesis') {
+      const current = (stage.results && typeof stage.results === 'object') ? stage.results : {};
+      stage.results = {
+        ...current,
+        model: current.model || memberName,
+        response: `${current.response || ''}${deltaText}`,
+      };
+    } else if (stageKind === 'rankings') {
+      const current = Array.isArray(stage.results) ? [...stage.results] : [];
+      const existing = current[memberIndex] || {
+        model: memberName,
+        ranking: '',
+        parsed_ranking: [],
+      };
+      current[memberIndex] = {
+        ...existing,
+        model: existing.model || memberName,
+        ranking: `${existing.ranking || ''}${deltaText}`,
+      };
+      stage.results = current;
+    } else {
+      const current = Array.isArray(stage.results) ? [...stage.results] : [];
+      const existing = current[memberIndex] || {
+        model: memberName,
+        response: '',
+        status: 'ok',
+      };
+      current[memberIndex] = {
+        ...existing,
+        model: existing.model || memberName,
+        response: `${existing.response || ''}${deltaText}`,
+        status: existing.status || 'ok',
+      };
+      stage.results = current;
+    }
+
+    nextStages[stageIndex] = stage;
+    return { ...message, stages: nextStages };
+  };
+
   const clearDeleteTimers = () => {
     if (deleteTimerRef.current) {
       clearTimeout(deleteTimerRef.current);
@@ -364,6 +424,30 @@ function App() {
                     status: 'complete',
                   }),
                 }))
+              );
+              break;
+            case 'stage_member_delta':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) =>
+                  applyStageMemberDelta(lastMsg, event.data)
+                )
+              );
+              break;
+            case 'speaker_delta':
+              updateConversationById(targetConversationId, (prev) =>
+                updateLastAssistantMessage(prev, (lastMsg) => {
+                  const existing = lastMsg?.response || lastMsg?.speaker_response || '';
+                  const delta = event?.data?.delta || '';
+                  return {
+                    ...lastMsg,
+                    message_type: 'speaker',
+                    model: lastMsg?.model || (conversationMode === 'chat' ? 'Assistant' : 'Chairman'),
+                    response: `${existing}${delta}`,
+                    speaker_response: `${existing}${delta}`,
+                    error: false,
+                    stages: [],
+                  };
+                })
               );
               break;
             case 'speaker_complete':

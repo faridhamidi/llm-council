@@ -4,6 +4,8 @@ import './CouncilStudio.css';
 
 const MAX_STAGE_MEMBERS = 6;
 const MAX_STAGES = 10;
+const DEFAULT_MEMBER_MAX_OUTPUT_TOKENS = 10000;
+const MAX_MEMBER_MAX_OUTPUT_TOKENS = 20000;
 
 const STAGE_KINDS = [
   { value: 'responses', label: 'Responses' },
@@ -27,6 +29,12 @@ const randomId = (prefix) => {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const normalizeMaxOutputTokens = (value) => {
+  const parsed = Number.parseInt(`${value ?? ''}`, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MEMBER_MAX_OUTPUT_TOKENS;
+  return Math.min(parsed, MAX_MEMBER_MAX_OUTPUT_TOKENS);
 };
 
 const inferStageKind = (stage, index) => {
@@ -102,6 +110,7 @@ const normalizeSettings = (settings, models) => {
       alias: member.alias || `Member ${nextMembers.length + 1}`,
       model_id: resolveModelId(member.model_id),
       system_prompt: member.system_prompt || '',
+      max_output_tokens: normalizeMaxOutputTokens(member.max_output_tokens),
     });
   }
 
@@ -202,6 +211,12 @@ const validateDraft = (draft) => {
 
   if (!draft.members.length) errors.push('At least one member is required.');
   if (!draft.title_model_id) errors.push('Title model is required.');
+  for (const member of draft.members) {
+    if (member.max_output_tokens < 1 || member.max_output_tokens > MAX_MEMBER_MAX_OUTPUT_TOKENS) {
+      errors.push(`Member '${member.alias}' max output tokens must be between 1 and ${MAX_MEMBER_MAX_OUTPUT_TOKENS}.`);
+      break;
+    }
+  }
 
   if (!draft.stages.length) errors.push('At least one stage is required.');
   if (draft.stages.length > MAX_STAGES) errors.push(`Maximum ${MAX_STAGES} stages allowed.`);
@@ -337,6 +352,7 @@ export default function CouncilStudio({ onClose }) {
         alias: `Member ${prev.members.length + 1}`,
         model_id: models[0]?.id || prev.title_model_id || prev.members[0]?.model_id || '',
         system_prompt: '',
+        max_output_tokens: DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
       };
       return { ...prev, members: [...prev.members, next] };
     });
@@ -485,6 +501,7 @@ export default function CouncilStudio({ onClose }) {
       title_model_id: normalized.title_model_id,
       use_system_prompt_stage2: normalized.use_system_prompt_stage2 ?? true,
       use_system_prompt_stage3: normalized.use_system_prompt_stage3 ?? true,
+      speaker_context_level: normalized.speaker_context_level || 'full',
     };
 
     setSaving(true);
@@ -509,6 +526,7 @@ export default function CouncilStudio({ onClose }) {
     title_model_id: settings.title_model_id,
     use_system_prompt_stage2: settings.use_system_prompt_stage2 ?? true,
     use_system_prompt_stage3: settings.use_system_prompt_stage3 ?? true,
+    speaker_context_level: settings.speaker_context_level || 'full',
   });
 
   const handleSavePreset = async () => {
@@ -730,6 +748,18 @@ export default function CouncilStudio({ onClose }) {
                     value={selectedMember.system_prompt}
                     onChange={(e) => updateMember(selectedMember.id, { system_prompt: e.target.value })}
                   />
+                  <label>Max Output Tokens</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_MEMBER_MAX_OUTPUT_TOKENS}
+                    value={selectedMember.max_output_tokens ?? DEFAULT_MEMBER_MAX_OUTPUT_TOKENS}
+                    onChange={(e) =>
+                      updateMember(selectedMember.id, {
+                        max_output_tokens: normalizeMaxOutputTokens(e.target.value),
+                      })
+                    }
+                  />
                 </>
               ) : (
                 <div className="empty">Select a member to edit.</div>
@@ -839,6 +869,7 @@ export default function CouncilStudio({ onClose }) {
                 title_model_id: draft.title_model_id,
                 use_system_prompt_stage2: draft.use_system_prompt_stage2,
                 use_system_prompt_stage3: draft.use_system_prompt_stage3,
+                speaker_context_level: draft.speaker_context_level,
                 stages: draft.stages,
               }, null, 2)}</pre>
             </div>

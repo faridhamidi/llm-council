@@ -14,6 +14,9 @@ export default function Sidebar({
 }) {
   const [regionOptions, setRegionOptions] = useState([]);
   const [selectedRegion, setSelectedRegion] = useState('');
+  const [awsProfileOptions, setAwsProfileOptions] = useState([]);
+  const [selectedAwsProfile, setSelectedAwsProfile] = useState('');
+  const [profileStatus, setProfileStatus] = useState(null);
   const [regionStatus, setRegionStatus] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
@@ -116,13 +119,16 @@ export default function Sidebar({
     let isMounted = true;
     const loadSetup = async () => {
       try {
-        const [optionsResponse, regionResponse] = await Promise.all([
+        const [optionsResponse, regionResponse, profileResponse] = await Promise.all([
           api.listBedrockRegions(),
           api.getBedrockRegion(),
+          api.getAwsProfile(),
         ]);
         if (!isMounted) return;
         setRegionOptions(optionsResponse.regions || []);
         setSelectedRegion(regionResponse.region || '');
+        setAwsProfileOptions(profileResponse.available_profiles || []);
+        setSelectedAwsProfile(profileResponse.profile || '');
       } catch (error) {
         console.error('Failed to load region settings:', error);
       }
@@ -177,6 +183,21 @@ export default function Sidebar({
       });
     } finally {
       setIsCheckingConnection(false);
+    }
+  };
+
+  const handleAwsProfileUpdate = async () => {
+    try {
+      const response = await api.updateAwsProfile(selectedAwsProfile);
+      setProfileStatus({
+        type: 'success',
+        message: response.profile
+          ? `Using AWS profile: ${response.profile}`
+          : 'Using default AWS profile resolution.',
+      });
+      await checkBedrockConnection();
+    } catch (error) {
+      setProfileStatus({ type: 'error', message: error.message || 'Failed to update AWS profile.' });
     }
   };
 
@@ -626,6 +647,23 @@ export default function Sidebar({
       </div>
 
       <div className="bedrock-section">
+        <label htmlFor="aws-profile-select">AWS SSO Profile (Session)</label>
+        <select
+          id="aws-profile-select"
+          value={selectedAwsProfile}
+          onChange={(event) => setSelectedAwsProfile(event.target.value)}
+        >
+          <option value="">Auto (env/default)</option>
+          {awsProfileOptions.map((profile) => (
+            <option key={profile} value={profile}>
+              {profile}
+            </option>
+          ))}
+        </select>
+        <button className="action-btn bedrock-update" onClick={handleAwsProfileUpdate}>
+          <span>Use Profile</span>
+        </button>
+
         <label htmlFor="bedrock-region-select">Bedrock Region</label>
         <select
           id="bedrock-region-select"
@@ -652,6 +690,11 @@ export default function Sidebar({
         {regionStatus && (
           <div className={`token-status ${regionStatus.type}`}>
             {regionStatus.message}
+          </div>
+        )}
+        {profileStatus && (
+          <div className={`token-status ${profileStatus.type}`}>
+            {profileStatus.message}
           </div>
         )}
         {connectionStatus && (

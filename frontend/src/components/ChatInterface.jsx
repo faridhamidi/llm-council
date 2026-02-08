@@ -55,6 +55,9 @@ export default function ChatInterface({
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
+  const composerRef = useRef(null);
+  const [composerHeight, setComposerHeight] = useState(170);
 
   // Check for paused state
   const lastMessage = conversation?.messages?.[conversation.messages.length - 1];
@@ -88,7 +91,10 @@ export default function ChatInterface({
     const labelMap = buildLabelMap(stages);
     return stages.map((stage, stageIndex) => {
       const stageLabelMap = stage.label_to_model || labelMap;
-      if (stage.status === 'running') {
+      const hasResults = stage.kind === 'synthesis'
+        ? Boolean(stage.results && typeof stage.results === 'object' && stage.results.response)
+        : Array.isArray(stage.results) && stage.results.length > 0;
+      if (stage.status === 'running' && !hasResults) {
         return (
           <div key={stage.id || stageIndex} className="stage-loading">
             <div className="spinner"></div>
@@ -96,36 +102,58 @@ export default function ChatInterface({
           </div>
         );
       }
+      const stageKey = stage.id || stageIndex;
       if (stage.kind === 'rankings') {
         return (
-          <StageRankings
-            key={stage.id || stageIndex}
-            rankings={stage.results}
-            labelToModel={stageLabelMap}
-            aggregateRankings={stage.aggregate_rankings}
-            stageName={stage.name}
-            stagePrompt={stage.prompt}
-          />
+          <div key={stageKey}>
+            {stage.status === 'running' && (
+              <div className="stage-loading">
+                <div className="spinner"></div>
+                <span>Generating: {stage.name || `Stage ${stageIndex + 1}`}...</span>
+              </div>
+            )}
+            <StageRankings
+              rankings={stage.results}
+              labelToModel={stageLabelMap}
+              aggregateRankings={stage.aggregate_rankings}
+              stageName={stage.name}
+              stagePrompt={stage.prompt}
+            />
+          </div>
         );
       }
       if (stage.kind === 'synthesis') {
         return (
-          <StageSynthesis
-            key={stage.id || stageIndex}
-            finalResponse={stage.results}
-            labelToModel={stageLabelMap}
-            stageName={stage.name}
-            stagePrompt={stage.prompt}
-          />
+          <div key={stageKey}>
+            {stage.status === 'running' && (
+              <div className="stage-loading">
+                <div className="spinner"></div>
+                <span>Generating: {stage.name || `Stage ${stageIndex + 1}`}...</span>
+              </div>
+            )}
+            <StageSynthesis
+              finalResponse={stage.results}
+              labelToModel={stageLabelMap}
+              stageName={stage.name}
+              stagePrompt={stage.prompt}
+            />
+          </div>
         );
       }
       return (
-        <StageResponses
-          key={stage.id || stageIndex}
-          responses={stage.results}
-          stageName={stage.name}
-          stagePrompt={stage.prompt}
-        />
+        <div key={stageKey}>
+          {stage.status === 'running' && (
+            <div className="stage-loading">
+              <div className="spinner"></div>
+              <span>Generating: {stage.name || `Stage ${stageIndex + 1}`}...</span>
+            </div>
+          )}
+          <StageResponses
+            responses={stage.results}
+            stageName={stage.name}
+            stagePrompt={stage.prompt}
+          />
+        </div>
       );
     });
   };
@@ -163,9 +191,48 @@ export default function ChatInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const resizeComposerTextarea = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxHeight = 400;
+    const nextHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [conversation]);
+
+  useEffect(() => {
+    resizeComposerTextarea();
+  }, [input, isPaused, conversation?.messages?.length, remainingMessages]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) {
+      setComposerHeight(24);
+      return;
+    }
+
+    const updateHeight = () => {
+      const rect = composer.getBoundingClientRect();
+      setComposerHeight(Math.max(120, Math.ceil(rect.height)));
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, [isPaused, remainingMessages, conversation?.messages?.length]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -211,7 +278,10 @@ export default function ChatInterface({
   }
 
   return (
-    <div className="chat-interface">
+    <div
+      className="chat-interface"
+      style={{ '--composer-height': `${composerHeight}px` }}
+    >
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
@@ -263,111 +333,120 @@ export default function ChatInterface({
       </div>
 
       {isPaused && (
-        <div className="paused-input-container">
+        <div className="paused-input-container" ref={composerRef}>
           <div className="paused-banner">
             <span className="paused-icon">⏸️</span>
             <span>Council Paused - Waiting for Human Input</span>
           </div>
           <form className="input-form paused-form" onSubmit={handleResumeSubmit}>
-            <textarea
-              className="message-input"
-              placeholder="Provide your input to resume the council..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleResumeSubmit(e);
-                }
-              }}
-              disabled={isLoading}
-              rows={3}
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="send-button resume-button"
-              disabled={!input.trim() || isLoading}
-            >
-              Resume Council
-            </button>
+            <div className="composer-surface">
+              <textarea
+                ref={textareaRef}
+                className="message-input"
+                placeholder="Provide your input to resume the council..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleResumeSubmit(e);
+                  }
+                }}
+                disabled={isLoading}
+                rows={3}
+                autoFocus
+              />
+              <button
+                type="submit"
+                className="send-button resume-button"
+                disabled={!input.trim() || isLoading}
+              >
+                Resume Council
+              </button>
+            </div>
           </form>
         </div>
       )}
 
       {hasMessages && remainingMessages !== 0 && !isPaused && (
-        <form className="input-form follow-up" onSubmit={handleSubmit}>
+        <form className="input-form follow-up" onSubmit={handleSubmit} ref={composerRef}>
           {messageCounter}
-          <div className="input-wrapper">
-            <textarea
-              className="message-input"
-              placeholder={isChatMode ? "Send a message..." : "Ask a follow-up question..."}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || remainingMessages === 0}
-              rows={2}
-            />
+          <div className="composer-surface">
+            <div className="input-wrapper">
+              <textarea
+                ref={textareaRef}
+                className="message-input"
+                placeholder={isChatMode ? "Send a message..." : "Ask a follow-up question..."}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || remainingMessages === 0}
+                rows={1}
+              />
+            </div>
+            {isChatMode ? (
+              <div className="input-actions">
+                <button
+                  type="submit"
+                  className="send-button"
+                  disabled={!input.trim() || isLoading || remainingMessages === 0}
+                >
+                  Send
+                </button>
+              </div>
+            ) : (
+              <div className="input-actions">
+                <button
+                  type="button"
+                  className="reconvene-button"
+                  title="Force the full council to reconvene and deliberate on this question."
+                  disabled={!input.trim() || isLoading || remainingMessages === 0}
+                  onClick={() => {
+                    if (input.trim() && !isLoading) {
+                      onSendMessage(input, true); // Force Council
+                      setInput('');
+                    }
+                  }}
+                >
+                  Ask Council
+                </button>
+                <button
+                  type="submit"
+                  className="send-button"
+                  disabled={!input.trim() || isLoading || remainingMessages === 0}
+                  title="Ask the Council Speaker (faster)"
+                >
+                  Ask Speaker
+                </button>
+              </div>
+            )}
           </div>
-          {isChatMode ? (
-            <div className="input-actions">
-              <button
-                type="submit"
-                className="send-button"
-                disabled={!input.trim() || isLoading || remainingMessages === 0}
-              >
-                Send
-              </button>
-            </div>
-          ) : (
-            <div className="input-actions">
-              <button
-                type="button"
-                className="reconvene-button"
-                title="Force the full council to reconvene and deliberate on this question."
-                disabled={!input.trim() || isLoading || remainingMessages === 0}
-                onClick={() => {
-                  if (input.trim() && !isLoading) {
-                    onSendMessage(input, true); // Force Council
-                    setInput('');
-                  }
-                }}
-              >
-                Ask Council
-              </button>
-              <button
-                type="submit"
-                className="send-button"
-                disabled={!input.trim() || isLoading || remainingMessages === 0}
-                title="Ask the Council Speaker (faster)"
-              >
-                Ask Speaker
-              </button>
-            </div>
-          )}
         </form>
       )}
 
       {conversation.messages.length === 0 && (
-        <form className="input-form" onSubmit={handleSubmit}>
-          <textarea
-            className="message-input"
-            placeholder={isChatMode
-              ? "Send a message... (Shift+Enter for new line, Enter to send)"
-              : "Ask your question... (Shift+Enter for new line, Enter to send)"}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            rows={3}
-          />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
+        <form className="input-form" onSubmit={handleSubmit} ref={composerRef}>
+          <div className="composer-surface">
+            <textarea
+              ref={textareaRef}
+              className="message-input"
+              placeholder={isChatMode
+                ? "Send a message... (Shift+Enter for new line, Enter to send)"
+                : "Ask your question... (Shift+Enter for new line, Enter to send)"}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              rows={1}
+            />
+            <button
+              type="submit"
+              className="send-button"
+              disabled={!input.trim() || isLoading}
+            >
+              Send
+            </button>
+          </div>
         </form>
       )}
     </div>
