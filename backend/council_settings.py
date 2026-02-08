@@ -215,6 +215,7 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
     stage1 = {
         "id": "stage-1",
         "name": "Individual Responses",
+        "kind": "responses",
         "prompt": "",
         "execution_mode": "parallel",
         "member_ids": list(member_ids),
@@ -222,6 +223,7 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
     stage2 = {
         "id": "stage-2",
         "name": "Peer Rankings",
+        "kind": "rankings",
         "prompt": DEFAULT_STAGE2_PROMPT,
         "execution_mode": "parallel",
         "member_ids": list(member_ids),
@@ -229,6 +231,7 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
     stage3 = {
         "id": "stage-3",
         "name": "Final Synthesis",
+        "kind": "synthesis",
         "prompt": DEFAULT_STAGE3_PROMPT,
         "execution_mode": "sequential",
         "member_ids": [default_chairman] if default_chairman else [],
@@ -239,32 +242,70 @@ def build_default_stages(members: List[Dict[str, Any]], chairman_id: str | None)
 def ensure_stage_config(settings: Dict[str, Any]) -> Dict[str, Any]:
     if settings.get("stages"):
         stages = settings.get("stages", [])
-        # Enforce Final Synthesis stage existence and structure
-        last_stage = stages[-1] if stages else None
-        chairman_id = settings.get("chairman_id")
-        
-        # If no stages or last stage isn't synthesis-like, append one
-        if not last_stage or last_stage.get("id") != "stage-3" and "Synthesis" not in last_stage.get("name", ""):
-             # Check if we have a "stage-3" equivalent hidden somewhere? 
-             # For now, let's just append the default synthesis stage if missing
-             stages.append({
-                "id": "stage-3",
+        members = settings.get("members", [])
+        member_ids = [m.get("id") for m in members if m.get("id")]
+        chairman_id = settings.get("chairman_id") or (member_ids[0] if member_ids else None)
+
+        def _kind_for_stage(stage: Dict[str, Any], index: int) -> str:
+            kind = stage.get("kind")
+            if kind in {"responses", "rankings", "synthesis"}:
+                return kind
+            if index == 1:
+                return "rankings"
+            if index == 2:
+                return "synthesis"
+            return "responses"
+
+        for index, stage in enumerate(stages):
+            stage["id"] = stage.get("id") or f"stage-{index + 1}"
+            stage["name"] = stage.get("name") or f"Stage {index + 1}"
+            stage["kind"] = _kind_for_stage(stage, index)
+            stage["execution_mode"] = "sequential" if stage.get("execution_mode") == "sequential" else "parallel"
+            stage["member_ids"] = [
+                mid for mid in (stage.get("member_ids") or [])
+                if mid in member_ids
+            ]
+
+            if stage["kind"] == "rankings" and not stage.get("prompt"):
+                stage["prompt"] = DEFAULT_STAGE2_PROMPT
+            if stage["kind"] == "synthesis":
+                stage["execution_mode"] = "sequential"
+                if not stage.get("prompt"):
+                    stage["prompt"] = DEFAULT_STAGE3_PROMPT
+
+        synthesis_indexes = [i for i, stage in enumerate(stages) if stage.get("kind") == "synthesis"]
+
+        if not synthesis_indexes:
+            stages.append({
+                "id": f"stage-{len(stages) + 1}",
                 "name": "Final Synthesis",
+                "kind": "synthesis",
                 "prompt": DEFAULT_STAGE3_PROMPT,
                 "execution_mode": "sequential",
                 "member_ids": [chairman_id] if chairman_id else [],
             })
-        
-        # Always ensure the last stage (Synthesis) uses the Chairman
-        if stages:
-            stages[-1]["member_ids"] = [chairman_id] if chairman_id else []
-            stages[-1]["prompt"] = stages[-1].get("prompt") or DEFAULT_STAGE3_PROMPT
-            
-        for stage in stages:
-            if stage.get("id") == "stage-2" and not stage.get("prompt"):
-                stage["prompt"] = DEFAULT_STAGE2_PROMPT
-            if stage.get("id") == "stage-3" and not stage.get("prompt"):
-                stage["prompt"] = DEFAULT_STAGE3_PROMPT
+            synthesis_index = len(stages) - 1
+        else:
+            synthesis_index = synthesis_indexes[-1]
+            # Keep only the last synthesis stage as canonical.
+            for idx in synthesis_indexes[:-1]:
+                stages[idx]["kind"] = "responses"
+            synthesis_stage = stages.pop(synthesis_index)
+            stages.append(synthesis_stage)
+            synthesis_index = len(stages) - 1
+
+        synthesis_stage = stages[synthesis_index]
+        if not synthesis_stage.get("member_ids"):
+            synthesis_stage["member_ids"] = [chairman_id] if chairman_id else []
+        if len(synthesis_stage["member_ids"]) > 1:
+            synthesis_stage["member_ids"] = [synthesis_stage["member_ids"][0]]
+
+        if synthesis_stage.get("member_ids"):
+            settings["chairman_id"] = synthesis_stage["member_ids"][0]
+        elif chairman_id:
+            settings["chairman_id"] = chairman_id
+
+        settings["stages"] = stages
         return settings
     members = settings.get("members", [])
     chairman_id = settings.get("chairman_id")
@@ -320,8 +361,10 @@ def _upgrade_settings(settings: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     if "use_system_prompt_stage3" not in settings:
         settings["use_system_prompt_stage3"] = True
         changed = True
-    if "stages" not in settings:
-        settings = ensure_stage_config(settings)
+    before_stage_normalize = json.dumps(settings, sort_keys=True)
+    settings = ensure_stage_config(settings)
+    after_stage_normalize = json.dumps(settings, sort_keys=True)
+    if before_stage_normalize != after_stage_normalize:
         changed = True
     # Multi-turn conversation fields (Chairman handles follow-ups)
     if "speaker_context_level" not in settings:
@@ -387,4 +430,3 @@ def normalize_settings_for_region(settings: Dict[str, Any], region: str) -> Dict
     if next_settings.get("title_model_id"):
         next_settings["title_model_id"] = resolve_model_for_region(next_settings["title_model_id"], region)
     return ensure_stage_config(next_settings)
-

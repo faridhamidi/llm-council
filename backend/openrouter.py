@@ -198,6 +198,7 @@ def _sync_converse_with_sdk(
     model: str,
     bedrock_messages: List[Dict[str, Any]],
     system_prompt: Optional[str],
+    timeout: float = 120.0,
 ) -> Dict[str, Any]:
     try:
         import boto3  # type: ignore
@@ -213,29 +214,70 @@ def _sync_converse_with_sdk(
     profile = _resolve_aws_profile()
     region = get_bedrock_region()
 
+    connect_timeout = max(2.0, min(10.0, timeout / 3.0))
+    read_timeout = max(5.0, timeout)
+
     session = boto3.Session(profile_name=profile, region_name=region)
-    client = session.client("bedrock-runtime", region_name=region)
-
-    payload: Dict[str, Any] = {
-        "modelId": model,
-        "messages": bedrock_messages,
-    }
-    if system_prompt:
-        payload["system"] = [{"text": system_prompt}]
-
+    client_kwargs: Dict[str, Any] = {"region_name": region}
     try:
-        response = client.converse(**payload)
-        return _parse_converse_response(response)
-    except ClientError as exc:
-        error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
-        if system_prompt and (error.get("Code") == "ValidationException"):
-            retry_response = client.converse(modelId=model, messages=bedrock_messages)
-            parsed = _parse_converse_response(retry_response)
-            parsed["system_prompt_dropped"] = True
+        from botocore.config import Config  # type: ignore
+
+        client_kwargs["config"] = Config(
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
+    except Exception:
+        pass
+    client = session.client("bedrock-runtime", **client_kwargs)
+
+    def _candidate_model_ids(base_model_id: str) -> List[str]:
+        candidates = [base_model_id]
+        parts = base_model_id.split(".", 1)
+        if len(parts) == 2 and parts[0] in {"us", "global", "apac", "eu"}:
+            stripped = parts[1]
+            if stripped:
+                candidates.append(stripped)
+        return candidates
+
+    for index, candidate in enumerate(_candidate_model_ids(model)):
+        payload: Dict[str, Any] = {
+            "modelId": candidate,
+            "messages": bedrock_messages,
+        }
+        if system_prompt:
+            payload["system"] = [{"text": system_prompt}]
+
+        try:
+            response = client.converse(**payload)
+            parsed = _parse_converse_response(response)
+            if candidate != model:
+                parsed["resolved_model_id"] = candidate
             return parsed
-        return {"error": _normalize_boto3_error(exc)}
-    except Exception as exc:
-        return {"error": _normalize_boto3_error(exc)}
+        except ClientError as exc:
+            error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
+            code = error.get("Code")
+
+            if system_prompt and code == "ValidationException":
+                try:
+                    retry_response = client.converse(modelId=candidate, messages=bedrock_messages)
+                    parsed = _parse_converse_response(retry_response)
+                    parsed["system_prompt_dropped"] = True
+                    if candidate != model:
+                        parsed["resolved_model_id"] = candidate
+                    return parsed
+                except Exception:
+                    pass
+
+            if code in {"ValidationException", "ResourceNotFoundException"} and index == 0:
+                # Retry once with stripped prefix model IDs when settings use profile-like IDs.
+                continue
+
+            return {"error": _normalize_boto3_error(exc)}
+        except Exception as exc:
+            return {"error": _normalize_boto3_error(exc)}
+
+    return {"error": "Bedrock model identifier is invalid for the current region."}
 
 
 async def query_model(
@@ -270,6 +312,7 @@ async def query_model(
         model,
         bedrock_messages,
         system_prompt,
+        timeout,
     )
     if sdk_response.get("error"):
         fallback_token = (get_bedrock_api_key() or "").strip()

@@ -294,7 +294,7 @@ def resolve_model_for_region(model_id: str, region: str) -> str:
 # Council members - list of Bedrock model or inference profile identifiers
 COUNCIL_MODELS = [
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "us.anthropic.claude-opus-4-6-v1",
     "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ]
@@ -308,7 +308,7 @@ COUNCIL_ALIASES = [
 ]
 
 # Chairman model - synthesizes final response
-CHAIRMAN_MODEL = "us.anthropic.claude-opus-4-5-20251101-v1:0"
+CHAIRMAN_MODEL = "us.anthropic.claude-opus-4-6-v1"
 CHAIRMAN_ALIAS = "Chairman"
 
 # Lightweight model for title generation

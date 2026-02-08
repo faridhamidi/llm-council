@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import CouncilStudio from './components/CouncilStudio';
 import { api, setAccessKey, clearAccessKey } from './api';
 import logoMark from './assets/NetZero2050-logo.svg';
 import './App.css';
@@ -14,6 +15,7 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCouncilStudioOpen, setIsCouncilStudioOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [hasPin, setHasPin] = useState(false);
   const [authPolicy, setAuthPolicy] = useState(null);
@@ -598,6 +600,7 @@ function App() {
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
+          onOpenCouncilStudio={() => setIsCouncilStudioOpen(true)}
           accessKeyReady={authChecked && (authPolicy === 'disabled' || isAuthorized)}
         />
       </div>
@@ -612,15 +615,19 @@ function App() {
           </button>
           <div className="mobile-title">LLM Council</div>
         </div>
-        <ChatInterface
-          conversation={currentConversation}
-          onSendMessage={handleSendMessage}
-          onStop={handleStop}
-          onRetry={handleRetry}
-          onResume={handleResumeCouncil}
-          isLoading={streamingConversationId === currentConversationId}
-          remainingMessages={remainingMessages}
-        />
+        {isCouncilStudioOpen ? (
+          <CouncilStudio onClose={() => setIsCouncilStudioOpen(false)} />
+        ) : (
+          <ChatInterface
+            conversation={currentConversation}
+            onSendMessage={handleSendMessage}
+            onStop={handleStop}
+            onRetry={handleRetry}
+            onResume={handleResumeCouncil}
+            isLoading={streamingConversationId === currentConversationId}
+            remainingMessages={remainingMessages}
+          />
+        )}
       </div>
       <button
         className="sidebar-overlay"

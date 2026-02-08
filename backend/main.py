@@ -84,6 +84,15 @@ def _calculate_chat_remaining(messages: List[Dict[str, Any]]) -> int:
     user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
     return max(0, MAX_CHAT_MESSAGES - user_message_count)
 
+
+async def _safe_generate_title(message: str, api_key: str | None = None) -> str:
+    """Best-effort title generation that never breaks the response flow."""
+    try:
+        return await generate_conversation_title(message, api_key=api_key)
+    except Exception as exc:
+        print(f"Title generation failed: {exc}")
+        return "New Conversation"
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
@@ -200,6 +209,7 @@ class CouncilMemberConfig(BaseModel):
 class CouncilStageConfig(BaseModel):
     id: str
     name: str
+    kind: Literal["responses", "rankings", "synthesis"] | None = None
     prompt: str | None = ""
     execution_mode: Literal["parallel", "sequential"] = "parallel"
     member_ids: List[str]
@@ -207,7 +217,7 @@ class CouncilStageConfig(BaseModel):
 
 class CouncilSettingsRequest(BaseModel):
     members: List[CouncilMemberConfig]
-    chairman_id: str
+    chairman_id: str | None = None
     chairman_label: str | None = "Chairman"
     title_model_id: str
     use_system_prompt_stage2: bool = True
@@ -376,7 +386,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         settings = conversation.get("settings_snapshot") or get_settings()
         if is_first_message and not conversation.get("settings_snapshot"):
             storage.save_settings_snapshot(conversation_id, settings)
-            title = await generate_conversation_title(payload.content, api_key=bedrock_key)
+            title = await _safe_generate_title(payload.content, api_key=bedrock_key)
             storage.update_conversation_title(conversation_id, title)
 
         chat_response = await query_normal_chat(
@@ -409,7 +419,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         
         # Generate title in parallel if first message
         if is_first_message:
-            title = await generate_conversation_title(payload.content, api_key=bedrock_key)
+            title = await _safe_generate_title(payload.content, api_key=bedrock_key)
             storage.update_conversation_title(conversation_id, title)
             # Use current settings
             settings = get_settings()
@@ -809,9 +819,6 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
     if payload.title_model_id not in allowed_models:
         errors.append(f"Unsupported title model for region: {payload.title_model_id}")
 
-    if payload.chairman_id not in ids:
-        errors.append("Chairman must be one of the council members.")
-
     stages = (
         [stage.model_dump() for stage in payload.stages]
         if payload.stages
@@ -825,10 +832,16 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
     stage_ids = [stage["id"] for stage in stages]
     if len(set(stage_ids)) != len(stage_ids):
         errors.append("Stage IDs must be unique.")
-    for stage in stages:
+
+    synthesis_stage_indexes: List[int] = []
+    for stage_index, stage in enumerate(stages):
         stage_name = (stage.get("name") or "").strip()
         if not stage_name:
             errors.append("Stage names cannot be empty.")
+            break
+        stage_kind = stage.get("kind")
+        if stage_kind and stage_kind not in {"responses", "rankings", "synthesis"}:
+            errors.append(f"Stage '{stage_name}' has invalid kind.")
             break
         member_ids = stage.get("member_ids", [])
         if not member_ids:
@@ -840,8 +853,41 @@ def _validate_council_settings(payload: CouncilSettingsRequest) -> List[str]:
         if any(member_id not in ids for member_id in member_ids):
             errors.append(f"Stage '{stage_name}' references unknown members.")
             break
+        if stage_kind == "synthesis":
+            synthesis_stage_indexes.append(stage_index)
+            if len(member_ids) != 1:
+                errors.append("Synthesis stage must include exactly one member (chairman).")
+                break
+
+    if not synthesis_stage_indexes:
+        # Backward-compatible fallback: treat the last stage as synthesis if kind not set.
+        if stages:
+            if len(stages[-1].get("member_ids", [])) != 1:
+                errors.append("Final stage must include exactly one member (chairman).")
+        else:
+            errors.append("At least one stage is required.")
+    else:
+        if len(synthesis_stage_indexes) > 1:
+            errors.append("Only one synthesis stage is allowed.")
+        elif synthesis_stage_indexes[0] != len(stages) - 1:
+            errors.append("Synthesis stage must be the final stage.")
 
     return errors
+
+
+def _derive_chairman_id_from_stages(
+    stages: List[Dict[str, Any]],
+    fallback_chairman_id: str | None,
+) -> str | None:
+    for stage in stages:
+        if stage.get("kind") == "synthesis":
+            member_ids = stage.get("member_ids", [])
+            return member_ids[0] if member_ids else fallback_chairman_id
+    if stages:
+        last_member_ids = stages[-1].get("member_ids", [])
+        if last_member_ids:
+            return last_member_ids[0]
+    return fallback_chairman_id
 
 
 @app.post("/api/settings/council")
@@ -859,11 +905,12 @@ async def update_council_settings(request: CouncilSettingsRequest):
             request.chairman_id,
         )
     )
+    chairman_id = _derive_chairman_id_from_stages(stages, request.chairman_id)
     settings = {
         "version": 2,
         "max_members": MAX_COUNCIL_MEMBERS,
         "members": [member.model_dump() for member in request.members],
-        "chairman_id": request.chairman_id,
+        "chairman_id": chairman_id,
         "chairman_label": request.chairman_label or "Chairman",
         "title_model_id": request.title_model_id,
         "use_system_prompt_stage2": request.use_system_prompt_stage2,
@@ -975,7 +1022,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 settings = conversation_snapshot.get("settings_snapshot") or get_settings()
                 if is_first_message and not conversation_snapshot.get("settings_snapshot"):
                     storage.save_settings_snapshot(conversation_id, settings)
-                    title = await generate_conversation_title(request.content, api_key=bedrock_key)
+                    title = await _safe_generate_title(request.content, api_key=bedrock_key)
                     storage.update_conversation_title(conversation_id, title)
                     await event_queue.put({"type": "title_complete", "data": {"title": title}})
 
@@ -1009,7 +1056,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     storage.save_settings_snapshot(conversation_id, current_settings)
                     
                     # Start title generation in parallel (don't await yet)
-                    title_task = asyncio.create_task(generate_conversation_title(request.content, api_key=bedrock_key))
+                    title_task = asyncio.create_task(_safe_generate_title(request.content, api_key=bedrock_key))
                 else:
                     conversation_snapshot = storage.get_conversation(conversation_id) or {}
                     current_settings = conversation_snapshot.get("settings_snapshot") or get_settings()

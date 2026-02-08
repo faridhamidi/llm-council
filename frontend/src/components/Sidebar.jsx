@@ -9,6 +9,7 @@ export default function Sidebar({
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  onOpenCouncilStudio,
   accessKeyReady = true,
 }) {
   const [regionOptions, setRegionOptions] = useState([]);
@@ -619,7 +620,7 @@ export default function Sidebar({
         <button className="action-btn" onClick={() => onNewConversation('chat')}>
           <span>+ New Chat</span>
         </button>
-        <button className="action-btn" onClick={openCouncilModal}>
+        <button className="action-btn" onClick={onOpenCouncilStudio || openCouncilModal}>
           <span>Council Settings</span>
         </button>
       </div>
