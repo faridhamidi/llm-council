@@ -86,7 +86,7 @@ class CouncilSettingsValidationTest(unittest.TestCase):
             name="Stage 1",
             prompt="",
             execution_mode="parallel",
-            member_ids=["member-1"] * 6,
+            member_ids=["member-1"] * (main.MAX_STAGE_MEMBERS + 1),
         )
         payload = main.CouncilSettingsRequest(
             members=[member],

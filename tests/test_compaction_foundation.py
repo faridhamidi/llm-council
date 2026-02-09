@@ -2,7 +2,7 @@ import os
 import unittest
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from backend import compaction
 from backend import council
@@ -284,6 +284,124 @@ class CompactionHookDisabledTest(unittest.IsolatedAsyncioTestCase):
             await main._maybe_handle_auto_compaction("conv-disabled")
 
         get_conversation.assert_not_called()
+
+
+class CompactionDarkLaunchExecutionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_compaction_hook_persists_summary_state_when_enabled(self):
+        conversation = {
+            "id": "conv-dark",
+            "total_tokens": 5000,
+            "messages": [
+                {"id": 1, "role": "user", "content": "u1", "token_count": 100},
+                {"id": 2, "role": "assistant", "message_type": "speaker", "response": "a1", "token_count": 120},
+                {"id": 3, "role": "user", "content": "u2", "token_count": 100},
+                {"id": 4, "role": "assistant", "message_type": "speaker", "response": "a2", "token_count": 120},
+            ],
+            "settings_snapshot": {
+                "members": [{"id": "m1", "model_id": "test-model"}],
+                "chairman_id": "m1",
+            },
+        }
+        with patch.object(main, "AUTO_COMPACTION_ENABLED", True), patch.object(
+            main,
+            "AUTO_COMPACTION_TRIGGER_TOKENS",
+            1000,
+        ), patch.object(main, "AUTO_COMPACTION_TARGET_TOKENS", 700), patch.object(
+            main,
+            "AUTO_COMPACTION_RECENT_USER_TURNS",
+            1,
+        ), patch.object(
+            main.storage,
+            "get_compaction_state",
+            return_value=None,
+        ), patch.object(
+            main,
+            "query_model",
+            new=AsyncMock(return_value={"content": "Compacted summary text"}),
+        ), patch.object(
+            main.storage,
+            "upsert_compaction_state",
+        ) as upsert_state, patch.object(
+            main.storage,
+            "append_compaction_event",
+        ) as append_event:
+            await main._maybe_handle_auto_compaction(
+                "conv-dark",
+                conversation=conversation,
+                settings=conversation["settings_snapshot"],
+            )
+
+        upsert_state.assert_called_once()
+        args, kwargs = upsert_state.call_args
+        self.assertEqual(args[0], "conv-dark")
+        self.assertEqual(kwargs["summary_text"], "Compacted summary text")
+        self.assertEqual(kwargs["compacted_until_message_id"], 2)
+        append_event.assert_called()
+
+
+class CompactionContextConsumptionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_query_normal_chat_prepends_compaction_summary(self):
+        settings = {
+            "members": [{"id": "m1", "alias": "Assistant", "model_id": "test-model", "system_prompt": ""}],
+            "chairman_id": "m1",
+        }
+        conversation_messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "message_type": "speaker", "response": "hi"},
+        ]
+        with patch.object(
+            council,
+            "query_model",
+            new=AsyncMock(return_value={"content": "ok"}),
+        ) as query_mock:
+            await council.query_normal_chat(
+                "follow-up",
+                conversation_messages,
+                settings,
+                compaction_summary="Prior summary",
+            )
+
+        call = query_mock.call_args
+        sent_messages = call.args[1]
+        self.assertEqual(sent_messages[0]["role"], "assistant")
+        self.assertIn("Prior summary", sent_messages[0]["content"])
+
+    async def test_query_council_speaker_includes_compaction_summary(self):
+        settings = {
+            "members": [{"id": "m1", "alias": "Chair", "model_id": "test-model", "system_prompt": ""}],
+            "chairman_id": "m1",
+            "speaker_context_level": "minimal",
+        }
+        conversation_messages = [
+            {
+                "role": "assistant",
+                "message_type": "council",
+                "stages": [
+                    {
+                        "id": "stage-3",
+                        "kind": "synthesis",
+                        "name": "Final",
+                        "results": {"model": "Chair", "response": "Council synthesis"},
+                    }
+                ],
+            }
+        ]
+        with patch.object(
+            council,
+            "query_model",
+            new=AsyncMock(return_value={"content": "ok"}),
+        ) as query_mock:
+            await council.query_council_speaker(
+                "question",
+                conversation_messages,
+                settings,
+                compaction_summary="Prior summary",
+            )
+
+        call = query_mock.call_args
+        sent_messages = call.args[1]
+        self.assertIn("Compacted Conversation Summary", sent_messages[0]["content"])
+        self.assertIn("Prior summary", sent_messages[0]["content"])
 
 
 if __name__ == "__main__":

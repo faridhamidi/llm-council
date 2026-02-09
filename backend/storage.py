@@ -74,7 +74,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 
         messages_rows = conn.execute(
             """
-            SELECT role, content, stage1_json, stage2_json, stage3_json, stages_json,
+            SELECT id, role, content, stage1_json, stage2_json, stage3_json, stages_json,
                    message_type, token_count, speaker_response, created_at
             FROM messages
             WHERE conversation_id = ?
@@ -90,6 +90,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         total_tokens += token_count
         if msg["role"] == "user":
             messages.append({
+                "id": msg["id"],
                 "role": "user",
                 "content": msg["content"],
                 "token_count": token_count,
@@ -99,6 +100,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
             if message_type == "speaker":
                 # Speaker response (follow-up)
                 messages.append({
+                    "id": msg["id"],
                     "role": "assistant",
                     "message_type": "speaker",
                     "response": msg["speaker_response"],
@@ -141,6 +143,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
                             "results": stage3,
                         })
                 messages.append({
+                    "id": msg["id"],
                     "role": "assistant",
                     "message_type": "council",
                     "stages": stages,

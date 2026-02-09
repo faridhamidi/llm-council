@@ -33,6 +33,7 @@ from .config import (
 from .openrouter import check_bedrock_connection
 from .openrouter import validate_bedrock_model_ids
 from .openrouter import list_local_aws_profiles
+from .openrouter import query_model
 from .compaction import (
     should_compact,
     select_messages_for_rollup,
@@ -105,9 +106,90 @@ def _calculate_chat_remaining(messages: List[Dict[str, Any]]) -> int:
     return max(0, MAX_CHAT_MESSAGES - user_message_count)
 
 
+def _message_is_after_compaction_cutoff(message: Dict[str, Any], cutoff: int | None) -> bool:
+    if cutoff is None:
+        return True
+    message_id = message.get("id")
+    try:
+        return int(message_id) > int(cutoff)
+    except (TypeError, ValueError):
+        # Preserve unknown IDs to avoid accidental context loss.
+        return True
+
+
+def _resolve_compaction_model_id(settings: Dict[str, Any]) -> str:
+    members = settings.get("members", []) or []
+    chairman_id = (settings.get("chairman_id") or "").strip()
+    for member in members:
+        if (member.get("id") or "").strip() == chairman_id:
+            return (member.get("model_id") or "").strip()
+    for member in members:
+        model_id = (member.get("model_id") or "").strip()
+        if model_id:
+            return model_id
+    return ""
+
+
+def _estimate_rollup_tokens(messages: List[Dict[str, Any]]) -> int:
+    total = 0
+    for message in messages:
+        token_count = message.get("token_count")
+        try:
+            total += int(token_count or 0)
+            continue
+        except (TypeError, ValueError):
+            pass
+
+        if message.get("role") == "user":
+            total += estimate_token_count(message.get("content", "") or "")
+            continue
+
+        if message.get("message_type") == "speaker":
+            total += estimate_token_count(
+                message.get("response", "") or message.get("speaker_response", "") or ""
+            )
+            continue
+
+        if message.get("message_type") == "council":
+            stages = message.get("stages") or []
+            final_result = get_final_response(stages)
+            total += estimate_token_count(final_result.get("response", "") or "")
+    return total
+
+
+def _compact_context_for_model(
+    conversation_id: str,
+    messages: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], str | None]:
+    """
+    Return model-facing messages with compacted history removed plus persisted summary text.
+    """
+    if not AUTO_COMPACTION_ENABLED:
+        return messages, None
+
+    state = storage.get_compaction_state(conversation_id)
+    if not state:
+        return messages, None
+
+    summary_text = (state.get("summary_text") or "").strip()
+    cutoff = state.get("compacted_until_message_id")
+    if cutoff is None:
+        return messages, summary_text or None
+
+    compacted_messages = [
+        message
+        for message in messages
+        if _message_is_after_compaction_cutoff(message, cutoff)
+    ]
+    return compacted_messages, summary_text or None
+
+
 async def _maybe_handle_auto_compaction(
     conversation_id: str,
     conversation: Dict[str, Any] | None = None,
+    settings: Dict[str, Any] | None = None,
+    api_key: str | None = None,
+    aws_profile: str | None = None,
 ) -> None:
     """
     Compaction integration point (foundation sprint).
@@ -139,20 +221,68 @@ async def _maybe_handle_auto_compaction(
     if not rollup_messages:
         return
 
-    # Payload construction is intentionally side-effect free in foundation mode.
-    build_compaction_prompt_payload(
+    payload = build_compaction_prompt_payload(
         existing_summary=state.get("summary_text", ""),
         messages_to_rollup=rollup_messages,
         target_tokens=AUTO_COMPACTION_TARGET_TOKENS,
         summary_max_tokens=AUTO_COMPACTION_SUMMARY_MAX_TOKENS,
     )
+    next_compacted_until = selection.get("next_compacted_until_message_id")
+    if next_compacted_until is None:
+        return
 
-    storage.append_compaction_event(
-        conversation_id,
-        trigger_reason="eligible_noop",
-        before_tokens=total_tokens,
-        after_tokens=total_tokens,
-    )
+    settings_for_compaction = settings or snapshot.get("settings_snapshot") or get_settings()
+    model_id = _resolve_compaction_model_id(settings_for_compaction)
+    if not model_id:
+        storage.append_compaction_event(
+            conversation_id,
+            trigger_reason="skipped_no_model",
+            before_tokens=total_tokens,
+            after_tokens=total_tokens,
+        )
+        return
+
+    try:
+        summary_response = await query_model(
+            model_id,
+            messages=[{"role": "user", "content": payload["user_prompt"]}],
+            system_prompt=payload["system_prompt"],
+            api_key=api_key,
+            aws_profile=aws_profile,
+            max_output_tokens=AUTO_COMPACTION_SUMMARY_MAX_TOKENS,
+        )
+        summary_text = (summary_response or {}).get("content", "").strip()
+        if not summary_text:
+            storage.append_compaction_event(
+                conversation_id,
+                trigger_reason="summary_empty",
+                before_tokens=total_tokens,
+                after_tokens=total_tokens,
+            )
+            return
+
+        summary_token_count = estimate_token_count(summary_text)
+        storage.upsert_compaction_state(
+            conversation_id,
+            summary_text=summary_text,
+            summary_token_count=summary_token_count,
+            compacted_until_message_id=int(next_compacted_until),
+        )
+        rolled_up_tokens = _estimate_rollup_tokens(rollup_messages)
+        after_tokens_estimate = max(0, total_tokens - rolled_up_tokens + summary_token_count)
+        storage.append_compaction_event(
+            conversation_id,
+            trigger_reason="compacted",
+            before_tokens=total_tokens,
+            after_tokens=after_tokens_estimate,
+        )
+    except Exception as exc:
+        storage.append_compaction_event(
+            conversation_id,
+            trigger_reason=f"error:{type(exc).__name__}",
+            before_tokens=total_tokens,
+            after_tokens=total_tokens,
+        )
 
 
 async def _safe_generate_title(
@@ -546,11 +676,16 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     
     # Add user message
     storage.add_user_message(conversation_id, payload.content, token_count=user_token_count)
-    await _maybe_handle_auto_compaction(conversation_id)
+    await _maybe_handle_auto_compaction(
+        conversation_id,
+        api_key=bedrock_key,
+        aws_profile=bedrock_profile,
+    )
 
     # Refresh conversation to get the message we just added (for context)
     conversation = storage.get_conversation(conversation_id)
     messages = conversation.get("messages", [])
+    model_messages, compaction_summary = _compact_context_for_model(conversation_id, messages)
 
     if conversation_mode == "chat":
         settings = conversation.get("settings_snapshot") or get_settings()
@@ -565,10 +700,11 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
 
         chat_response = await query_normal_chat(
             payload.content,
-            conversation.get("messages", []),
+            model_messages,
             settings,
             api_key=bedrock_key,
             aws_profile=bedrock_profile,
+            compaction_summary=compaction_summary,
         )
 
         storage.add_speaker_message(
@@ -576,7 +712,12 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             chat_response.get("response", ""),
             token_count=chat_response.get("token_count", 0),
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
 
         updated_conversation = storage.get_conversation(conversation_id)
         return {
@@ -614,7 +755,8 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             api_key=bedrock_key,
             aws_profile=bedrock_profile,
             settings=settings,
-            conversation_messages=messages[:-1] if not is_first_message else None # Exclude the very last message if it's the trigger? 
+            conversation_messages=model_messages[:-1] if not is_first_message else None, # Exclude the very last message if it's the trigger? 
+            compaction_summary=compaction_summary,
             # Actually, standard is to include history UP TO the current prompt. 
             # The prompt IS the user's last message.
             # So history should be everything BEFORE the last message.
@@ -631,7 +773,12 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             stages,
             token_count=response_tokens,
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
 
         # Refresh conversation to get updated data
         updated_conversation = storage.get_conversation(conversation_id)
@@ -670,10 +817,11 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
         # Query the council speaker
         speaker_response = await query_council_speaker(
             payload.content,
-            conversation["messages"], # This includes the new user message
+            model_messages, # Includes the new user message after compaction cutoff.
             settings,
             api_key=bedrock_key,
             aws_profile=bedrock_profile,
+            compaction_summary=compaction_summary,
         )
         
         # Add speaker message
@@ -682,7 +830,12 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             speaker_response.get("response", ""),
             token_count=speaker_response.get("token_count", 0),
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
         
         # Refresh conversation to get updated token count
         updated_conversation = storage.get_conversation(conversation_id)
@@ -746,14 +899,19 @@ async def retry_message(conversation_id: str, http_request: Request):
     conversation = storage.get_conversation(conversation_id)
     conversation_mode = conversation.get("mode", "council")
     settings = conversation.get("settings_snapshot") or get_settings()
+    model_messages, compaction_summary = _compact_context_for_model(
+        conversation_id,
+        conversation.get("messages", []),
+    )
 
     if conversation_mode == "chat":
         chat_response = await query_normal_chat(
             last_user_msg.get("content", ""),
-            conversation.get("messages", []),
+            model_messages,
             settings,
             api_key=bedrock_key,
             aws_profile=bedrock_profile,
+            compaction_summary=compaction_summary,
         )
 
         storage.add_speaker_message(
@@ -761,7 +919,12 @@ async def retry_message(conversation_id: str, http_request: Request):
             chat_response.get("response", ""),
             token_count=chat_response.get("token_count", 0),
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
         updated_conversation = storage.get_conversation(conversation_id)
         return {
             "message_type": "speaker",
@@ -789,7 +952,11 @@ async def retry_message(conversation_id: str, http_request: Request):
         current_messages = updated_conv.get("messages", [])
         
         # We need to exclude the very last user message (the one being retried) from history
-        history = current_messages[:-1] if current_messages else []
+        compacted_history_messages, compacted_history_summary = _compact_context_for_model(
+            conversation_id,
+            current_messages,
+        )
+        history = compacted_history_messages[:-1] if compacted_history_messages else []
 
         stages, metadata = await run_full_council(
             last_user_msg.get("content", ""),
@@ -797,6 +964,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             aws_profile=bedrock_profile,
             settings=settings,
             conversation_messages=history,
+            compaction_summary=compacted_history_summary,
         )
 
         final_result = get_final_response(stages)
@@ -806,7 +974,12 @@ async def retry_message(conversation_id: str, http_request: Request):
             stages,
             token_count=response_tokens,
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
         
         updated_conversation = storage.get_conversation(conversation_id)
         return {
@@ -820,10 +993,11 @@ async def retry_message(conversation_id: str, http_request: Request):
         # This was a follow-up - retry speaker query
         speaker_response = await query_council_speaker(
             last_user_msg.get("content", ""),
-            conversation["messages"],
+            model_messages,
             settings,
             api_key=bedrock_key,
             aws_profile=bedrock_profile,
+            compaction_summary=compaction_summary,
         )
         
         storage.add_speaker_message(
@@ -831,7 +1005,12 @@ async def retry_message(conversation_id: str, http_request: Request):
             speaker_response.get("response", ""),
             token_count=speaker_response.get("token_count", 0),
         )
-        await _maybe_handle_auto_compaction(conversation_id)
+        await _maybe_handle_auto_compaction(
+            conversation_id,
+            settings=settings,
+            api_key=bedrock_key,
+            aws_profile=bedrock_profile,
+        )
         updated_conversation = storage.get_conversation(conversation_id)
         council_outputs = calculate_council_output_count(updated_conversation.get("messages", []))
         dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
@@ -1251,11 +1430,19 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
             # Add user message
             user_token_count = estimate_token_count(request.content)
             storage.add_user_message(conversation_id, request.content, token_count=user_token_count)
-            await _maybe_handle_auto_compaction(conversation_id)
+            await _maybe_handle_auto_compaction(
+                conversation_id,
+                api_key=bedrock_key,
+                aws_profile=bedrock_profile,
+            )
 
             if conversation_mode == "chat":
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
                 settings = conversation_snapshot.get("settings_snapshot") or get_settings()
+                model_messages, compaction_summary = _compact_context_for_model(
+                    conversation_id,
+                    conversation_snapshot.get("messages", []),
+                )
                 if is_first_message and not conversation_snapshot.get("settings_snapshot"):
                     storage.save_settings_snapshot(conversation_id, settings)
                     title = await _safe_generate_title(
@@ -1273,11 +1460,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
 
                 chat_response = await query_normal_chat(
                     request.content,
-                    conversation_snapshot.get("messages", []),
+                    model_messages,
                     settings,
                     api_key=bedrock_key,
                     aws_profile=bedrock_profile,
                     on_token_delta=on_chat_delta,
+                    compaction_summary=compaction_summary,
                 )
 
                 storage.add_speaker_message(
@@ -1285,7 +1473,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     chat_response.get("response", ""),
                     token_count=chat_response.get("token_count", 0),
                 )
-                await _maybe_handle_auto_compaction(conversation_id)
+                await _maybe_handle_auto_compaction(
+                    conversation_id,
+                    settings=settings,
+                    api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
+                )
                 latest = storage.get_conversation(conversation_id) or {}
                 await event_queue.put({
                     "type": "speaker_complete",
@@ -1334,10 +1527,14 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 # Get history for reconvening
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
                 messages = conversation_snapshot.get("messages", [])
+                compacted_messages, compaction_summary = _compact_context_for_model(
+                    conversation_id,
+                    messages,
+                )
                 # The user message was JUST added. So history is everything up to the user message.
                 # messages includes the new user message at the end.
                 # So we pass messages[:-1] as history.
-                history = messages[:-1] if not is_first_message else None
+                history = compacted_messages[:-1] if not is_first_message else None
 
                 stages, _ = await run_full_council(
                     request.content,
@@ -1348,6 +1545,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     on_stage_complete=on_stage_complete,
                     on_stage_delta=on_stage_delta,
                     conversation_messages=history,
+                    compaction_summary=compaction_summary,
                 )
 
                 # Wait for title generation if it exists
@@ -1365,7 +1563,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     stages,
                     token_count=response_tokens,
                 )
-                await _maybe_handle_auto_compaction(conversation_id)
+                await _maybe_handle_auto_compaction(
+                    conversation_id,
+                    settings=current_settings,
+                    api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
+                )
 
                 # Send completion event
                 await event_queue.put({"type": "complete"})
@@ -1378,6 +1581,10 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                 # Refresh conversation to include the new user message
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
                 settings = conversation_snapshot.get("settings_snapshot") or get_settings()
+                model_messages, compaction_summary = _compact_context_for_model(
+                    conversation_id,
+                    conversation_snapshot.get("messages", []),
+                )
 
                 async def on_speaker_delta(delta: str) -> None:
                     if cancel_event.is_set():
@@ -1386,11 +1593,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
 
                 speaker_response = await query_council_speaker(
                     request.content,
-                    conversation_snapshot.get("messages", []),
+                    model_messages,
                     settings,
                     api_key=bedrock_key,
                     aws_profile=bedrock_profile,
                     on_token_delta=on_speaker_delta,
+                    compaction_summary=compaction_summary,
                 )
 
                 storage.add_speaker_message(
@@ -1398,7 +1606,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     speaker_response.get("response", ""),
                     token_count=speaker_response.get("token_count", 0),
                 )
-                await _maybe_handle_auto_compaction(conversation_id)
+                await _maybe_handle_auto_compaction(
+                    conversation_id,
+                    settings=settings,
+                    api_key=bedrock_key,
+                    aws_profile=bedrock_profile,
+                )
 
                 await event_queue.put({"type": "speaker_complete", "data": speaker_response})
                 await event_queue.put({"type": "complete"})

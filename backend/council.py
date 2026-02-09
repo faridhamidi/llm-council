@@ -683,6 +683,7 @@ async def run_full_council(
     on_stage_complete: StageEventHandler | None = None,
     on_stage_delta: StageEventHandler | None = None,
     conversation_messages: List[Dict[str, Any]] | None = None,
+    compaction_summary: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Run the council pipeline using the configured stages.
@@ -698,6 +699,10 @@ async def run_full_council(
     
     # Format history once
     history_text = _format_conversation_history(conversation_messages) if conversation_messages else None
+    summary_text = (compaction_summary or "").strip()
+    if summary_text:
+        summary_block = "=== Compacted Conversation Summary ===\n" + summary_text
+        history_text = f"{summary_block}\n\n{history_text}" if history_text else summary_block
     members = settings.get("members", [])
     stages_config = settings.get("stages") or build_default_stages(members, settings.get("chairman_id"))
     stages_output: List[Dict[str, Any]] = []
@@ -1008,6 +1013,7 @@ async def query_normal_chat(
     api_key: str | None = None,
     aws_profile: str | None = None,
     on_token_delta: TokenDeltaHandler | None = None,
+    compaction_summary: str | None = None,
 ) -> Dict[str, Any]:
     """
     Query a single model for normal chat mode (no council pipeline).
@@ -1026,6 +1032,12 @@ async def query_normal_chat(
     system_prompt = chairman_member.get("system_prompt", "") or None
 
     messages = _build_chat_history_messages(conversation_messages)
+    summary_text = (compaction_summary or "").strip()
+    if summary_text:
+        messages.insert(0, {
+            "role": "assistant",
+            "content": f"Conversation Summary:\n{summary_text}",
+        })
 
     # Ensure the latest user query is present even if caller passed stale history.
     if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_query:
@@ -1093,6 +1105,7 @@ async def query_council_speaker(
     api_key: str | None = None,
     aws_profile: str | None = None,
     on_token_delta: TokenDeltaHandler | None = None,
+    compaction_summary: str | None = None,
 ) -> Dict[str, Any]:
     """
     Query the council speaker for a follow-up response.
@@ -1135,11 +1148,16 @@ async def query_council_speaker(
     
     # Build context based on level
     context = _build_speaker_context(conversation_messages, settings, context_level)
+    summary_text = (compaction_summary or "").strip()
+    summary_section = (
+        f"=== Compacted Conversation Summary ===\n{summary_text}\n\n"
+        if summary_text else ""
+    )
     
     # Create the prompt for the chairman (follow-up role)
     chairman_prompt = f"""You are the Council Chairman, continuing a conversation after the initial council analysis.
 
-{context}
+{summary_section}{context}
 
 ---
 

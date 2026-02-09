@@ -262,10 +262,32 @@ def ensure_stage_config(settings: Dict[str, Any]) -> Dict[str, Any]:
             kind = stage.get("kind")
             if kind in {"responses", "rankings", "synthesis"}:
                 return kind
+
+            stage_name = (stage.get("name") or "").strip().lower()
+            if "synthesis" in stage_name:
+                return "synthesis"
+            if "ranking" in stage_name:
+                return "rankings"
+            if "response" in stage_name:
+                return "responses"
+
+            stage_id = (stage.get("id") or "").strip().lower()
+            if stage_id.startswith("stage-"):
+                suffix = stage_id[len("stage-"):]
+                if suffix.isdigit():
+                    stage_number = int(suffix)
+                    if stage_number == 2:
+                        return "rankings"
+                    if stage_number == 3:
+                        return "synthesis"
+                    if stage_number == 1:
+                        return "responses"
+
+            # Positional fallback for malformed/legacy stage entries.
+            if index == len(stages) - 1:
+                return "synthesis"
             if index == 1:
                 return "rankings"
-            if index == 2:
-                return "synthesis"
             return "responses"
 
         for index, stage in enumerate(stages):
