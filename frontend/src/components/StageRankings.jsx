@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './StageRankings.css';
+
+const MARKDOWN_PLUGINS = [remarkGfm];
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
@@ -14,7 +16,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function StageRankings({
+function StageRankings({
   rankings,
   labelToModel,
   aggregateRankings,
@@ -28,11 +30,19 @@ export default function StageRankings({
     return null;
   }
 
-  const activeRanking = rankings[activeTab];
+  const activeRanking = useMemo(
+    () => rankings[activeTab] || rankings[0] || null,
+    [rankings, activeTab]
+  );
 
-  const buildCopyText = () => {
+  const rankingText = useMemo(
+    () => deAnonymizeText(activeRanking?.ranking || '', labelToModel),
+    [activeRanking, labelToModel]
+  );
+
+  const copyText = useMemo(() => {
     if (!activeRanking) return '';
-    let text = `Evaluator: ${activeRanking.model}\n\n${deAnonymizeText(activeRanking.ranking || '', labelToModel)}`;
+    let text = `Evaluator: ${activeRanking.model}\n\n${rankingText}`;
     if (activeRanking.parsed_ranking && activeRanking.parsed_ranking.length > 0) {
       const parsed = activeRanking.parsed_ranking.map((label, i) => {
         const name = labelToModel && labelToModel[label] ? labelToModel[label] : label;
@@ -41,10 +51,10 @@ export default function StageRankings({
       text += `\n\nExtracted Ranking:\n${parsed}`;
     }
     return text;
-  };
+  }, [activeRanking, rankingText, labelToModel]);
 
-  const handleCopy = async () => {
-    const text = buildCopyText();
+  const handleCopy = useCallback(async () => {
+    const text = copyText;
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -64,7 +74,11 @@ export default function StageRankings({
     } catch (error) {
       console.error('Failed to copy Stage 2 output:', error);
     }
-  };
+  }, [copyText]);
+
+  if (!activeRanking) {
+    return null;
+  }
 
   return (
     <div className="stage stage-rankings">
@@ -102,8 +116,8 @@ export default function StageRankings({
           </button>
         </div>
         <div className="ranking-content markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {deAnonymizeText(activeRanking.ranking, labelToModel)}
+          <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS}>
+            {rankingText}
           </ReactMarkdown>
         </div>
 
@@ -151,3 +165,15 @@ export default function StageRankings({
     </div>
   );
 }
+
+function arePropsEqual(prevProps, nextProps) {
+  return (
+    prevProps.rankings === nextProps.rankings &&
+    prevProps.labelToModel === nextProps.labelToModel &&
+    prevProps.aggregateRankings === nextProps.aggregateRankings &&
+    prevProps.stageName === nextProps.stageName &&
+    prevProps.stagePrompt === nextProps.stagePrompt
+  );
+}
+
+export default memo(StageRankings, arePropsEqual);

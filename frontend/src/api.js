@@ -300,7 +300,6 @@ export const api = {
    */
   async sendMessageStream(conversationId, content, onEvent, options = {}) {
     const { signal, forceCouncil = false } = options;
-    console.log('API sendMessageStream:', { conversationId, forceCouncil });
     const response = await apiFetch(`/api/conversations/${conversationId}/message/stream`, {
       method: 'POST',
       headers: withAuth({
@@ -323,25 +322,48 @@ export const api = {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
+
+    const processEventBlock = (eventBlock) => {
+      const lines = eventBlock.split(/\r?\n/);
+      const dataLines = lines
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart());
+
+      if (dataLines.length === 0) {
+        return;
+      }
+
+      const payload = dataLines.join('\n');
+      if (!payload) {
+        return;
+      }
+
+      try {
+        const event = JSON.parse(payload);
+        onEvent(event.type, event);
+      } catch (e) {
+        console.error('Failed to parse SSE event:', e);
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const eventBlocks = buffer.split(/\r?\n\r?\n/);
+      buffer = eventBlocks.pop() || '';
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
-          }
-        }
+      for (const block of eventBlocks) {
+        processEventBlock(block);
       }
+    }
+
+    buffer += decoder.decode();
+    const trailing = buffer.trim();
+    if (trailing) {
+      processEventBlock(trailing);
     }
   },
 

@@ -355,6 +355,7 @@ function App() {
       setCurrentConversation(newConv);
       setRemainingMessages(mode === 'chat' ? 50 : null);
       setCurrentConversationId(newConv.id);
+      setIsCouncilStudioOpen(false);
       setIsSidebarOpen(false);
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -363,6 +364,7 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    setIsCouncilStudioOpen(false);
     setIsSidebarOpen(false);
   };
 

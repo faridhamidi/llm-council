@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './StageResponses.css';
 
-export default function StageResponses({ responses, stageName = 'Individual Responses', stagePrompt = '' }) {
+const MARKDOWN_PLUGINS = [remarkGfm];
+
+function StageResponses({ responses, stageName = 'Individual Responses', stagePrompt = '' }) {
   const [activeTab, setActiveTab] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -11,9 +13,12 @@ export default function StageResponses({ responses, stageName = 'Individual Resp
     return null;
   }
 
-  const activeResponse = responses[activeTab];
+  const activeResponse = useMemo(
+    () => responses[activeTab] || responses[0] || null,
+    [responses, activeTab]
+  );
 
-  const buildCopyText = () => {
+  const copyText = useMemo(() => {
     if (!activeResponse) return '';
     const header = `Model: ${activeResponse.model}`;
     if (activeResponse.status === 'failed') {
@@ -24,10 +29,10 @@ export default function StageResponses({ responses, stageName = 'Individual Resp
       ? '\nSystem prompt ignored by this model.'
       : '';
     return `${header}${promptWarning}\n\n${activeResponse.response || ''}`;
-  };
+  }, [activeResponse]);
 
-  const handleCopy = async () => {
-    const text = buildCopyText();
+  const handleCopy = useCallback(async () => {
+    const text = copyText;
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -47,7 +52,11 @@ export default function StageResponses({ responses, stageName = 'Individual Resp
     } catch (error) {
       console.error('Failed to copy Stage 1 output:', error);
     }
-  };
+  }, [copyText]);
+
+  if (!activeResponse) {
+    return null;
+  }
 
   return (
     <div className="stage stage-responses">
@@ -88,7 +97,7 @@ export default function StageResponses({ responses, stageName = 'Individual Resp
           </div>
         ) : (
           <div className="response-text markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS}>
               {activeResponse.response}
             </ReactMarkdown>
           </div>
@@ -97,3 +106,13 @@ export default function StageResponses({ responses, stageName = 'Individual Resp
     </div>
   );
 }
+
+function arePropsEqual(prevProps, nextProps) {
+  return (
+    prevProps.responses === nextProps.responses &&
+    prevProps.stageName === nextProps.stageName &&
+    prevProps.stagePrompt === nextProps.stagePrompt
+  );
+}
+
+export default memo(StageResponses, arePropsEqual);

@@ -1,10 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import StageResponses from './StageResponses';
 import StageRankings from './StageRankings';
 import StageSynthesis from './StageSynthesis';
 import './ChatInterface.css';
+
+const MARKDOWN_PLUGINS = [remarkGfm];
+const INITIAL_RENDERED_MESSAGES = 40;
+const LOAD_OLDER_BATCH = 40;
 
 function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', className }) {
   const [copied, setCopied] = useState(false);
@@ -54,10 +58,16 @@ export default function ChatInterface({
   remainingMessages,
 }) {
   const [input, setInput] = useState('');
+  const [visibleStart, setVisibleStart] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messagesContainerRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
+  const prependScrollAdjustmentRef = useRef(null);
   const textareaRef = useRef(null);
   const composerRef = useRef(null);
   const [composerHeight, setComposerHeight] = useState(170);
+  const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 
   // Check for paused state
   const lastMessage = conversation?.messages?.[conversation.messages.length - 1];
@@ -73,7 +83,7 @@ export default function ChatInterface({
     }
   };
 
-  const buildLabelMap = (stages) => {
+  const buildLabelMap = useCallback((stages) => {
     if (!Array.isArray(stages)) return null;
     for (const stage of stages) {
       if (stage?.label_to_model) {
@@ -81,9 +91,9 @@ export default function ChatInterface({
       }
     }
     return null;
-  };
+  }, []);
 
-  const renderDynamicStages = (message) => {
+  const renderDynamicStages = useCallback((message) => {
     const stages = message?.stages;
     if (!Array.isArray(stages) || stages.length === 0) {
       return null;
@@ -156,39 +166,41 @@ export default function ChatInterface({
         </div>
       );
     });
-  };
-
-  const renderSpeakerMessage = (msg) => {
-    const speakerResponse = msg.speaker_response || msg.response;
-    const speakerModel = msg.speaker_model || msg.model || (conversation?.mode === 'chat' ? 'Assistant' : 'Council Speaker');
-    const hasError = msg.error;
-
-    return (
-      <div className="speaker-message">
-        <div className="message-header">
-          <div className="message-label speaker-label">
-            💬 {speakerModel}
-          </div>
-          <CopyButton text={speakerResponse} className="copy-message-btn" />
-          {hasError && onRetry && (
-            <button className="retry-btn" onClick={() => onRetry && onRetry()}>
-              Retry
-            </button>
-          )}
-        </div>
-        <div className="message-content">
-          <div className="markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {speakerResponse}
-            </ReactMarkdown>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  }, [buildLabelMap]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const isNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+  };
+
+  const handleMessagesScroll = () => {
+    const nearBottom = isNearBottom();
+    shouldAutoScrollRef.current = nearBottom;
+    setShowJumpToLatest(!nearBottom);
+  };
+
+  const handleJumpToLatest = () => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+    scrollToBottom();
+  };
+
+  const handleShowOlderMessages = () => {
+    if (visibleStart <= 0) return;
+    const container = messagesContainerRef.current;
+    if (container) {
+      prependScrollAdjustmentRef.current = {
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+      };
+    }
+    setVisibleStart((prev) => Math.max(0, prev - LOAD_OLDER_BATCH));
   };
 
   const resizeComposerTextarea = () => {
@@ -202,8 +214,41 @@ export default function ChatInterface({
   };
 
   useEffect(() => {
-    scrollToBottom();
+    if (shouldAutoScrollRef.current) {
+      scrollToBottom();
+      setShowJumpToLatest(false);
+    } else {
+      setShowJumpToLatest(true);
+    }
   }, [conversation]);
+
+  useEffect(() => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+    const total = conversation?.messages?.length || 0;
+    setVisibleStart(Math.max(0, total - INITIAL_RENDERED_MESSAGES));
+    prependScrollAdjustmentRef.current = null;
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    const total = conversation?.messages?.length || 0;
+    if (visibleStart > total) {
+      setVisibleStart(Math.max(0, total - INITIAL_RENDERED_MESSAGES));
+    }
+  }, [conversation?.messages?.length, visibleStart]);
+
+  useLayoutEffect(() => {
+    const adjustment = prependScrollAdjustmentRef.current;
+    if (!adjustment) return;
+    const container = messagesContainerRef.current;
+    if (!container) {
+      prependScrollAdjustmentRef.current = null;
+      return;
+    }
+    const heightDelta = container.scrollHeight - adjustment.scrollHeight;
+    container.scrollTop = adjustment.scrollTop + heightDelta;
+    prependScrollAdjustmentRef.current = null;
+  }, [visibleStart, conversation?.messages?.length]);
 
   useEffect(() => {
     resizeComposerTextarea();
@@ -251,9 +296,80 @@ export default function ChatInterface({
   };
 
   // Calculate message counter display
-  const hasMessages = conversation?.messages?.length > 0;
+  const totalMessages = conversation?.messages?.length || 0;
+  const hasMessages = totalMessages > 0;
+  const hasOlderMessages = hasMessages && visibleStart > 0;
   const conversationMode = conversation?.mode || 'council';
   const isChatMode = conversationMode === 'chat';
+  const visibleMessages = useMemo(() => {
+    if (!hasMessages) return [];
+    return conversation.messages.slice(visibleStart);
+  }, [hasMessages, conversation?.messages, visibleStart]);
+  const renderMessage = useCallback((msg, index) => {
+    if (msg.role === 'user') {
+      return (
+        <div key={index} className="message-group">
+          <div className="user-message">
+            <div className="message-header">
+              <div className="message-label">You</div>
+              <CopyButton text={msg.content} className="copy-message-btn" />
+            </div>
+            <div className="message-content">
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS}>
+                  {msg.content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (msg.message_type === 'speaker') {
+      const speakerResponse = msg.speaker_response || msg.response;
+      const speakerModel = msg.speaker_model || msg.model || (conversationMode === 'chat' ? 'Assistant' : 'Council Speaker');
+      const hasError = msg.error;
+
+      return (
+        <div key={index} className="message-group">
+          <div className="speaker-message">
+            <div className="message-header">
+              <div className="message-label speaker-label">
+                💬 {speakerModel}
+              </div>
+              <CopyButton text={speakerResponse} className="copy-message-btn" />
+              {hasError && onRetry && (
+                <button className="retry-btn" onClick={() => onRetry && onRetry()}>
+                  Retry
+                </button>
+              )}
+            </div>
+            <div className="message-content">
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS}>
+                  {speakerResponse}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={index} className="message-group">
+        <div className="assistant-message">
+          <div className="message-label">🏛️ LLM Council</div>
+          {renderDynamicStages(msg)}
+        </div>
+      </div>
+    );
+  }, [conversationMode, onRetry, renderDynamicStages]);
+  const renderedMessages = useMemo(() => {
+    if (!visibleMessages.length) return null;
+    return visibleMessages.map((msg, offset) => renderMessage(msg, visibleStart + offset));
+  }, [visibleMessages, renderMessage, visibleStart]);
   const messageCounter = remainingMessages !== undefined && remainingMessages !== null && hasMessages ? (
     <div className={`message-counter ${remainingMessages <= 5 ? 'warning' : ''} ${remainingMessages === 0 ? 'limit-reached' : ''}`}>
       {remainingMessages === 0
@@ -282,39 +398,31 @@ export default function ChatInterface({
       className="chat-interface"
       style={{ '--composer-height': `${composerHeight}px` }}
     >
-      <div className="messages-container">
+      <div
+        ref={messagesContainerRef}
+        className="messages-container"
+        onScroll={handleMessagesScroll}
+      >
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
             <h2>Start a conversation</h2>
             <p>{isChatMode ? 'Start chatting with a single model' : 'Ask a question to consult the LLM Council'}</p>
           </div>
         ) : (
-          conversation.messages.map((msg, index) => (
-            <div key={index} className="message-group">
-              {msg.role === 'user' ? (
-                <div className="user-message">
-                  <div className="message-header">
-                    <div className="message-label">You</div>
-                    <CopyButton text={msg.content} className="copy-message-btn" />
-                  </div>
-                  <div className="message-content">
-                    <div className="markdown-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                </div>
-              ) : msg.message_type === 'speaker' ? (
-                renderSpeakerMessage(msg)
-              ) : (
-                <div className="assistant-message">
-                  <div className="message-label">🏛️ LLM Council</div>
-                  {renderDynamicStages(msg)}
-                </div>
-              )}
-            </div>
-          ))
+          <>
+            {hasOlderMessages && (
+              <div className="load-older-container">
+                <button
+                  type="button"
+                  className="load-older-btn"
+                  onClick={handleShowOlderMessages}
+                >
+                  Show {Math.min(LOAD_OLDER_BATCH, visibleStart)} older message{Math.min(LOAD_OLDER_BATCH, visibleStart) === 1 ? '' : 's'}
+                </button>
+              </div>
+            )}
+            {renderedMessages}
+          </>
         )}
 
         {isLoading && (
@@ -331,6 +439,17 @@ export default function ChatInterface({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          className="jump-to-latest-btn"
+          onClick={handleJumpToLatest}
+          aria-label="Jump to latest message"
+        >
+          Jump to latest
+        </button>
+      )}
 
       {isPaused && (
         <div className="paused-input-container" ref={composerRef}>

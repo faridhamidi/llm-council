@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './StageSynthesis.css';
+
+const MARKDOWN_PLUGINS = [remarkGfm];
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
@@ -12,7 +14,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function StageSynthesis({
+function StageSynthesis({
   finalResponse,
   labelToModel,
   stageName = 'Final Council Answer',
@@ -24,9 +26,18 @@ export default function StageSynthesis({
     return null;
   }
 
-  const handleCopy = async () => {
-    const raw = finalResponse.response || '';
-    const text = `Chairman: ${finalResponse.model}\n\n${deAnonymizeText(raw, labelToModel)}`;
+  const finalText = useMemo(
+    () => deAnonymizeText(finalResponse.response || '', labelToModel),
+    [finalResponse.response, labelToModel]
+  );
+
+  const copyText = useMemo(
+    () => `Chairman: ${finalResponse.model}\n\n${finalText}`,
+    [finalResponse.model, finalText]
+  );
+
+  const handleCopy = useCallback(async () => {
+    const text = copyText;
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -46,7 +57,7 @@ export default function StageSynthesis({
     } catch (error) {
       console.error('Failed to copy Stage 3 output:', error);
     }
-  };
+  }, [copyText]);
 
   return (
     <div className="stage stage-synthesis">
@@ -60,11 +71,22 @@ export default function StageSynthesis({
           </button>
         </div>
         <div className="final-text markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {deAnonymizeText(finalResponse.response, labelToModel)}
+          <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS}>
+            {finalText}
           </ReactMarkdown>
         </div>
       </div>
     </div>
   );
 }
+
+function arePropsEqual(prevProps, nextProps) {
+  return (
+    prevProps.finalResponse === nextProps.finalResponse &&
+    prevProps.labelToModel === nextProps.labelToModel &&
+    prevProps.stageName === nextProps.stageName &&
+    prevProps.stagePrompt === nextProps.stagePrompt
+  );
+}
+
+export default memo(StageSynthesis, arePropsEqual);

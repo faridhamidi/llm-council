@@ -3,6 +3,8 @@ import { api } from '../api';
 import logoMark from '../assets/NetZero2050-logo.svg';
 import './Sidebar.css';
 
+const STATUS_AUTO_DISMISS_MS = 4500;
+
 export default function Sidebar({
   conversations,
   currentConversationId,
@@ -16,9 +18,7 @@ export default function Sidebar({
   const [selectedRegion, setSelectedRegion] = useState('');
   const [awsProfileOptions, setAwsProfileOptions] = useState([]);
   const [selectedAwsProfile, setSelectedAwsProfile] = useState('');
-  const [profileStatus, setProfileStatus] = useState(null);
-  const [regionStatus, setRegionStatus] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState(null);
+  const [bedrockStatus, setBedrockStatus] = useState(null);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   const [isCouncilModalOpen, setIsCouncilModalOpen] = useState(false);
   const [councilSettings, setCouncilSettings] = useState(null);
@@ -132,18 +132,6 @@ export default function Sidebar({
       } catch (error) {
         console.error('Failed to load region settings:', error);
       }
-
-      try {
-        const connectionResponse = await api.getBedrockConnectionStatus();
-        if (!isMounted) return;
-        setConnectionStatus(connectionResponse);
-      } catch (error) {
-        if (!isMounted) return;
-        setConnectionStatus({
-          ok: false,
-          error: error.message || 'Failed to check Bedrock connection.',
-        });
-      }
     };
     loadSetup();
     return () => {
@@ -171,16 +159,34 @@ export default function Sidebar({
     };
   }, [isCouncilModalOpen]);
 
-  const checkBedrockConnection = async () => {
+  useEffect(() => {
+    if (!bedrockStatus) return undefined;
+    const timer = setTimeout(() => setBedrockStatus(null), STATUS_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [bedrockStatus]);
+
+  const checkBedrockConnection = async ({ showStatus = true } = {}) => {
     setIsCheckingConnection(true);
     try {
       const status = await api.getBedrockConnectionStatus();
-      setConnectionStatus(status);
+      if (showStatus) {
+        setBedrockStatus({
+          type: status.ok ? 'success' : 'error',
+          message: status.ok
+            ? `Connected via ${status.mode === 'sso' ? 'AWS SSO' : 'AWS credentials'}${status.profile ? ` (${status.profile})` : ''}`
+            : (status.error || 'Bedrock connection unavailable.'),
+        });
+      }
+      return status;
     } catch (error) {
-      setConnectionStatus({
-        ok: false,
-        error: error.message || 'Failed to check Bedrock connection.',
-      });
+      const fallback = { ok: false, error: error.message || 'Failed to check Bedrock connection.' };
+      if (showStatus) {
+        setBedrockStatus({
+          type: 'error',
+          message: fallback.error,
+        });
+      }
+      return fallback;
     } finally {
       setIsCheckingConnection(false);
     }
@@ -189,15 +195,15 @@ export default function Sidebar({
   const handleAwsProfileUpdate = async () => {
     try {
       const response = await api.updateAwsProfile(selectedAwsProfile);
-      setProfileStatus({
+      setBedrockStatus({
         type: 'success',
         message: response.profile
           ? `Using AWS profile: ${response.profile}`
           : 'Using default AWS profile resolution.',
       });
-      await checkBedrockConnection();
+      await checkBedrockConnection({ showStatus: false });
     } catch (error) {
-      setProfileStatus({ type: 'error', message: error.message || 'Failed to update AWS profile.' });
+      setBedrockStatus({ type: 'error', message: error.message || 'Failed to update AWS profile.' });
     }
   };
 
@@ -541,13 +547,13 @@ export default function Sidebar({
 
   const handleRegionUpdate = async () => {
     if (!selectedRegion) {
-      setRegionStatus({ type: 'error', message: 'Select a region first.' });
+      setBedrockStatus({ type: 'error', message: 'Select a region first.' });
       return;
     }
     try {
       const response = await api.updateBedrockRegion(selectedRegion);
-      setRegionStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
-      await checkBedrockConnection();
+      setBedrockStatus({ type: 'success', message: `Region set to ${selectedRegion}` });
+      await checkBedrockConnection({ showStatus: false });
       if (response.settings && isCouncilModalOpen) {
         const modelsResponse = await api.listBedrockModels();
         const models = modelsResponse.models || [];
@@ -555,7 +561,7 @@ export default function Sidebar({
         setCouncilSettings(coerceCouncilSettings(response.settings, models));
       }
     } catch (error) {
-      setRegionStatus({ type: 'error', message: error.message || 'Failed to update region.' });
+      setBedrockStatus({ type: 'error', message: error.message || 'Failed to update region.' });
     }
   };
 
@@ -647,63 +653,65 @@ export default function Sidebar({
       </div>
 
       <div className="bedrock-section">
-        <label htmlFor="aws-profile-select">AWS SSO Profile (Session)</label>
-        <select
-          id="aws-profile-select"
-          value={selectedAwsProfile}
-          onChange={(event) => setSelectedAwsProfile(event.target.value)}
-        >
-          <option value="">Auto (env/default)</option>
-          {awsProfileOptions.map((profile) => (
-            <option key={profile} value={profile}>
-              {profile}
-            </option>
-          ))}
-        </select>
-        <button className="action-btn bedrock-update" onClick={handleAwsProfileUpdate}>
-          <span>Use Profile</span>
-        </button>
+        <div className="bedrock-control">
+          <label htmlFor="aws-profile-select">AWS SSO Profile (Session)</label>
+          <div className="bedrock-control-row">
+            <select
+              id="aws-profile-select"
+              value={selectedAwsProfile}
+              onChange={(event) => setSelectedAwsProfile(event.target.value)}
+            >
+              <option value="">Auto (env/default)</option>
+              {awsProfileOptions.map((profile) => (
+                <option key={profile} value={profile}>
+                  {profile}
+                </option>
+              ))}
+            </select>
+            <button className="action-btn bedrock-inline-btn" onClick={handleAwsProfileUpdate}>
+              <span>Apply</span>
+            </button>
+          </div>
+        </div>
 
-        <label htmlFor="bedrock-region-select">Bedrock Region</label>
-        <select
-          id="bedrock-region-select"
-          value={selectedRegion}
-          onChange={(event) => setSelectedRegion(event.target.value)}
-        >
-          <option value="">Select region</option>
-          {regionOptions.map((region) => (
-            <option key={region.code} value={region.code}>
-              {region.label} ({region.code})
-            </option>
-          ))}
-        </select>
-        <button className="action-btn bedrock-update" onClick={handleRegionUpdate}>
-          <span>Update</span>
-        </button>
-        <button
-          className="action-btn bedrock-update"
-          onClick={checkBedrockConnection}
-          disabled={isCheckingConnection}
-        >
-          <span>{isCheckingConnection ? 'Checking...' : 'Check AWS SSO'}</span>
-        </button>
-        {regionStatus && (
-          <div className={`token-status ${regionStatus.type}`}>
-            {regionStatus.message}
+        <div className="bedrock-control">
+          <label htmlFor="bedrock-region-select">Bedrock Region</label>
+          <div className="bedrock-control-row">
+            <select
+              id="bedrock-region-select"
+              value={selectedRegion}
+              onChange={(event) => setSelectedRegion(event.target.value)}
+            >
+              <option value="">Select region</option>
+              {regionOptions.map((region) => (
+                <option key={region.code} value={region.code}>
+                  {region.label} ({region.code})
+                </option>
+              ))}
+            </select>
+            <button className="action-btn bedrock-inline-btn" onClick={handleRegionUpdate}>
+              <span>Apply</span>
+            </button>
           </div>
-        )}
-        {profileStatus && (
-          <div className={`token-status ${profileStatus.type}`}>
-            {profileStatus.message}
-          </div>
-        )}
-        {connectionStatus && (
-          <div className={`token-status ${connectionStatus.ok ? 'success' : 'error'}`}>
-            {connectionStatus.ok
-              ? `Connected via ${connectionStatus.mode === 'sso' ? 'AWS SSO' : 'AWS credentials'}${connectionStatus.profile ? ` (${connectionStatus.profile})` : ''}`
-              : (connectionStatus.error || 'Bedrock connection unavailable.')}
-          </div>
-        )}
+        </div>
+
+        <div className="bedrock-actions">
+          <button
+            className="action-btn bedrock-check-btn"
+            onClick={checkBedrockConnection}
+            disabled={isCheckingConnection}
+          >
+            <span>{isCheckingConnection ? 'Checking...' : 'Check AWS SSO'}</span>
+          </button>
+        </div>
+
+        <div className="bedrock-status-list">
+          {bedrockStatus && (
+            <div className={`token-status ${bedrockStatus.type}`}>
+              {bedrockStatus.message}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="conversations-header">Recent Sessions</div>

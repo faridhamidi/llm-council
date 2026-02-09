@@ -136,7 +136,24 @@
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+.bedrock-control {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.bedrock-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.bedrock-actions {
+  display: flex;
 }
 
 .bedrock-section label {
@@ -148,6 +165,8 @@
 }
 
 .bedrock-section select {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--border-primary);
   border-radius: 10px;
   padding: 9px 10px;
@@ -163,8 +182,25 @@
   outline: none;
 }
 
-.action-btn.bedrock-update {
+.action-btn.bedrock-inline-btn {
+  width: auto;
+  min-width: 86px;
+  padding: 9px 12px;
+  border-radius: 10px;
+}
+
+.action-btn.bedrock-check-btn {
   margin-top: 2px;
+}
+
+.bedrock-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bedrock-status-list .token-status {
+  margin-top: 0;
 }
 
 .conversations-header {
