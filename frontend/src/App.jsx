@@ -353,7 +353,8 @@ function App() {
       ]);
       conversationCacheRef.current[newConv.id] = newConv;
       setCurrentConversation(newConv);
-      setRemainingMessages(mode === 'chat' ? 50 : null);
+      // Keep frontend optimistic counter aligned with backend's temporary chat cap.
+      setRemainingMessages(mode === 'chat' ? 100 : null);
       setCurrentConversationId(newConv.id);
       setIsCouncilStudioOpen(false);
       setIsSidebarOpen(false);

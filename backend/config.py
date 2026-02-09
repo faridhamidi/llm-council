@@ -365,7 +365,15 @@ DATA_DIR = "data/conversations"
 
 # Multi-turn conversation settings
 MAX_FOLLOW_UP_MESSAGES = 20  # Maximum follow-up messages per conversation (easily adjustable)
-MAX_CHAT_MESSAGES = 50  # Maximum user messages for normal chat mode per conversation
+# Temporary breathing room while auto-compaction foundation is rolled out.
+MAX_CHAT_MESSAGES = 100  # Maximum user messages for normal chat mode per conversation
+
+# Auto-compaction foundation flags (feature remains disabled in this sprint).
+AUTO_COMPACTION_ENABLED = os.getenv("AUTO_COMPACTION_ENABLED", "").lower() in {"1", "true", "yes"}
+AUTO_COMPACTION_TRIGGER_TOKENS = _int_env("AUTO_COMPACTION_TRIGGER_TOKENS", 200_000)
+AUTO_COMPACTION_TARGET_TOKENS = _int_env("AUTO_COMPACTION_TARGET_TOKENS", 120_000)
+AUTO_COMPACTION_RECENT_USER_TURNS = _int_env("AUTO_COMPACTION_RECENT_USER_TURNS", 12)
+AUTO_COMPACTION_SUMMARY_MAX_TOKENS = _int_env("AUTO_COMPACTION_SUMMARY_MAX_TOKENS", 4_000)
 
 # Speaker context levels - determines how much context the speaker receives for follow-ups
 SPEAKER_CONTEXT_LEVELS = {

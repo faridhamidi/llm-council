@@ -836,6 +836,61 @@ def estimate_token_count(text: str) -> int:
     return len(text) // 4
 
 
+def _collect_context_entries(
+    conversation_messages: List[Dict[str, Any]],
+    council_assistant_mode: str = "skip",
+) -> List[Dict[str, str]]:
+    """
+    Build normalized conversation entries for context assembly.
+
+    Args:
+        conversation_messages: Stored conversation messages.
+        council_assistant_mode: How to represent council messages.
+            - "skip": ignore council assistant messages
+            - "final": include council final synthesis as assistant text
+            - "placeholder": include fixed placeholder marker
+    """
+    entries: List[Dict[str, str]] = []
+    for msg in conversation_messages:
+        role = msg.get("role")
+        if role == "user":
+            content = (msg.get("content") or "").strip()
+            if content:
+                entries.append({"role": "user", "source": "user", "content": content})
+            continue
+
+        if role != "assistant":
+            continue
+
+        message_type = msg.get("message_type", "speaker")
+        if message_type == "speaker":
+            content = (msg.get("response") or msg.get("speaker_response") or "").strip()
+            if content:
+                entries.append({"role": "assistant", "source": "speaker", "content": content})
+            continue
+
+        if message_type != "council":
+            continue
+
+        if council_assistant_mode == "skip":
+            continue
+
+        if council_assistant_mode == "placeholder":
+            entries.append({
+                "role": "assistant",
+                "source": "council",
+                "content": "[Council Analysis - see above]",
+            })
+            continue
+
+        stages = msg.get("stages") or []
+        final = get_final_response(stages)
+        content = (final.get("response") or "").strip()
+        if content:
+            entries.append({"role": "assistant", "source": "council", "content": content})
+    return entries
+
+
 def _build_speaker_context(
     conversation_messages: List[Dict[str, Any]],
     settings: Dict[str, Any],
@@ -853,7 +908,7 @@ def _build_speaker_context(
         Context string for the speaker
     """
     context_parts = []
-    
+
     # Find the first council response for stage data
     council_response = None
     for msg in conversation_messages:
@@ -875,12 +930,13 @@ def _build_speaker_context(
         final_result = get_final_response(council_response.get("stages") or [])
         if final_result.get("response"):
             context_parts.append(f"Council's Initial Analysis:\n{final_result.get('response')}")
-        
+
         # Add all user messages
-        user_queries = []
-        for msg in conversation_messages:
-            if msg.get("role") == "user":
-                user_queries.append(msg.get("content", ""))
+        user_queries = [
+            entry["content"]
+            for entry in _collect_context_entries(conversation_messages, council_assistant_mode="skip")
+            if entry.get("source") == "user"
+        ]
         if user_queries:
             context_parts.append("User Queries:\n" + "\n---\n".join(user_queries))
     
@@ -912,17 +968,15 @@ def _build_speaker_context(
         
         # Add full conversation history
         conv_history = []
-        for msg in conversation_messages:
-            role = msg.get("role")
-            if role == "user":
-                conv_history.append(f"User: {msg.get('content', '')}")
-            elif role == "assistant":
-                if msg.get("message_type") == "speaker":
-                    conv_history.append(f"Speaker: {msg.get('response', '')}")
-                else:
-                    # For council response, just reference it
-                    conv_history.append("Assistant: [Council Analysis - see above]")
-        
+        for entry in _collect_context_entries(conversation_messages, council_assistant_mode="placeholder"):
+            source = entry.get("source")
+            if source == "user":
+                conv_history.append(f"User: {entry.get('content', '')}")
+            elif source == "speaker":
+                conv_history.append(f"Speaker: {entry.get('content', '')}")
+            else:
+                conv_history.append(f"Assistant: {entry.get('content', '')}")
+
         if conv_history:
             context_parts.append("=== Conversation History ===\n" + "\n\n".join(conv_history))
     
@@ -941,31 +995,10 @@ def _resolve_chairman_member(settings: Dict[str, Any]) -> Dict[str, Any] | None:
 
 
 def _build_chat_history_messages(conversation_messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = []
-    for msg in conversation_messages:
-        role = msg.get("role")
-        if role == "user":
-            content = (msg.get("content") or "").strip()
-            if content:
-                messages.append({"role": "user", "content": content})
-            continue
-
-        if role != "assistant":
-            continue
-
-        message_type = msg.get("message_type", "speaker")
-        if message_type == "speaker":
-            content = (msg.get("response") or msg.get("speaker_response") or "").strip()
-            if content:
-                messages.append({"role": "assistant", "content": content})
-            continue
-
-        stages = msg.get("stages") or []
-        final = get_final_response(stages)
-        content = (final.get("response") or "").strip()
-        if content:
-            messages.append({"role": "assistant", "content": content})
-    return messages
+    return [
+        {"role": entry["role"], "content": entry["content"]}
+        for entry in _collect_context_entries(conversation_messages, council_assistant_mode="final")
+    ]
 
 
 async def query_normal_chat(

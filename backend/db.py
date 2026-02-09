@@ -47,6 +47,35 @@ def _ensure_multiturn_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN speaker_response TEXT")
 
 
+def _ensure_compaction_tables(conn: sqlite3.Connection) -> None:
+    """Ensure compaction foundation tables exist for summary state and audit events."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS conversation_compaction_state (
+          conversation_id TEXT PRIMARY KEY,
+          summary_text TEXT,
+          summary_token_count INTEGER NOT NULL DEFAULT 0,
+          compacted_until_message_id INTEGER,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS conversation_compaction_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_id TEXT NOT NULL,
+          trigger_reason TEXT NOT NULL,
+          before_tokens INTEGER,
+          after_tokens INTEGER,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_compaction_events_conversation
+          ON conversation_compaction_events(conversation_id);
+        """
+    )
+
+
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -422,6 +451,7 @@ def init_db() -> None:
         _migrate_from_json(conn)
         _ensure_stages_column(conn)
         _ensure_multiturn_columns(conn)
+        _ensure_compaction_tables(conn)
         _backfill_stages_json(conn)
         conn.commit()
     finally:

@@ -24,10 +24,20 @@ from .config import (
     SPEAKER_CONTEXT_LEVELS,
     DEFAULT_MEMBER_MAX_OUTPUT_TOKENS,
     MAX_MEMBER_MAX_OUTPUT_TOKENS,
+    AUTO_COMPACTION_ENABLED,
+    AUTO_COMPACTION_TRIGGER_TOKENS,
+    AUTO_COMPACTION_TARGET_TOKENS,
+    AUTO_COMPACTION_RECENT_USER_TURNS,
+    AUTO_COMPACTION_SUMMARY_MAX_TOKENS,
 )
 from .openrouter import check_bedrock_connection
 from .openrouter import validate_bedrock_model_ids
 from .openrouter import list_local_aws_profiles
+from .compaction import (
+    should_compact,
+    select_messages_for_rollup,
+    build_compaction_prompt_payload,
+)
 from .council_settings import (
     get_settings,
     update_settings,
@@ -93,6 +103,56 @@ def _get_session_aws_profile(request: Request) -> str | None:
 def _calculate_chat_remaining(messages: List[Dict[str, Any]]) -> int:
     user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
     return max(0, MAX_CHAT_MESSAGES - user_message_count)
+
+
+async def _maybe_handle_auto_compaction(
+    conversation_id: str,
+    conversation: Dict[str, Any] | None = None,
+) -> None:
+    """
+    Compaction integration point (foundation sprint).
+
+    With AUTO_COMPACTION_ENABLED=false this is a no-op to preserve runtime behavior.
+    """
+    if not AUTO_COMPACTION_ENABLED:
+        return
+
+    snapshot = conversation or storage.get_conversation(conversation_id)
+    if not snapshot:
+        return
+
+    total_tokens = int(snapshot.get("total_tokens") or 0)
+    thresholds = {
+        "trigger_tokens": AUTO_COMPACTION_TRIGGER_TOKENS,
+        "target_tokens": AUTO_COMPACTION_TARGET_TOKENS,
+    }
+    if not should_compact(total_tokens, AUTO_COMPACTION_ENABLED, thresholds):
+        return
+
+    state = storage.get_compaction_state(conversation_id) or {}
+    selection = select_messages_for_rollup(
+        snapshot.get("messages", []),
+        compacted_until_message_id=state.get("compacted_until_message_id"),
+        recent_turns=AUTO_COMPACTION_RECENT_USER_TURNS,
+    )
+    rollup_messages = selection.get("messages_to_rollup", [])
+    if not rollup_messages:
+        return
+
+    # Payload construction is intentionally side-effect free in foundation mode.
+    build_compaction_prompt_payload(
+        existing_summary=state.get("summary_text", ""),
+        messages_to_rollup=rollup_messages,
+        target_tokens=AUTO_COMPACTION_TARGET_TOKENS,
+        summary_max_tokens=AUTO_COMPACTION_SUMMARY_MAX_TOKENS,
+    )
+
+    storage.append_compaction_event(
+        conversation_id,
+        trigger_reason="eligible_noop",
+        before_tokens=total_tokens,
+        after_tokens=total_tokens,
+    )
 
 
 async def _safe_generate_title(
@@ -486,6 +546,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
     
     # Add user message
     storage.add_user_message(conversation_id, payload.content, token_count=user_token_count)
+    await _maybe_handle_auto_compaction(conversation_id)
 
     # Refresh conversation to get the message we just added (for context)
     conversation = storage.get_conversation(conversation_id)
@@ -515,6 +576,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             chat_response.get("response", ""),
             token_count=chat_response.get("token_count", 0),
         )
+        await _maybe_handle_auto_compaction(conversation_id)
 
         updated_conversation = storage.get_conversation(conversation_id)
         return {
@@ -569,6 +631,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             stages,
             token_count=response_tokens,
         )
+        await _maybe_handle_auto_compaction(conversation_id)
 
         # Refresh conversation to get updated data
         updated_conversation = storage.get_conversation(conversation_id)
@@ -619,6 +682,7 @@ async def send_message(conversation_id: str, payload: SendMessageRequest, http_r
             speaker_response.get("response", ""),
             token_count=speaker_response.get("token_count", 0),
         )
+        await _maybe_handle_auto_compaction(conversation_id)
         
         # Refresh conversation to get updated token count
         updated_conversation = storage.get_conversation(conversation_id)
@@ -697,6 +761,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             chat_response.get("response", ""),
             token_count=chat_response.get("token_count", 0),
         )
+        await _maybe_handle_auto_compaction(conversation_id)
         updated_conversation = storage.get_conversation(conversation_id)
         return {
             "message_type": "speaker",
@@ -741,6 +806,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             stages,
             token_count=response_tokens,
         )
+        await _maybe_handle_auto_compaction(conversation_id)
         
         updated_conversation = storage.get_conversation(conversation_id)
         return {
@@ -765,6 +831,7 @@ async def retry_message(conversation_id: str, http_request: Request):
             speaker_response.get("response", ""),
             token_count=speaker_response.get("token_count", 0),
         )
+        await _maybe_handle_auto_compaction(conversation_id)
         updated_conversation = storage.get_conversation(conversation_id)
         council_outputs = calculate_council_output_count(updated_conversation.get("messages", []))
         dynamic_limit = MAX_FOLLOW_UP_MESSAGES + council_outputs
@@ -1184,6 +1251,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
             # Add user message
             user_token_count = estimate_token_count(request.content)
             storage.add_user_message(conversation_id, request.content, token_count=user_token_count)
+            await _maybe_handle_auto_compaction(conversation_id)
 
             if conversation_mode == "chat":
                 conversation_snapshot = storage.get_conversation(conversation_id) or {}
@@ -1217,6 +1285,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     chat_response.get("response", ""),
                     token_count=chat_response.get("token_count", 0),
                 )
+                await _maybe_handle_auto_compaction(conversation_id)
                 latest = storage.get_conversation(conversation_id) or {}
                 await event_queue.put({
                     "type": "speaker_complete",
@@ -1296,6 +1365,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     stages,
                     token_count=response_tokens,
                 )
+                await _maybe_handle_auto_compaction(conversation_id)
 
                 # Send completion event
                 await event_queue.put({"type": "complete"})
@@ -1328,6 +1398,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest,
                     speaker_response.get("response", ""),
                     token_count=speaker_response.get("token_count", 0),
                 )
+                await _maybe_handle_auto_compaction(conversation_id)
 
                 await event_queue.put({"type": "speaker_complete", "data": speaker_response})
                 await event_queue.put({"type": "complete"})

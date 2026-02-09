@@ -269,6 +269,91 @@ def add_speaker_message(
         conn.commit()
 
 
+def get_compaction_state(conversation_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch compaction summary state for a conversation."""
+    with with_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT conversation_id, summary_text, summary_token_count, compacted_until_message_id, updated_at
+            FROM conversation_compaction_state
+            WHERE conversation_id = ?
+            """,
+            (conversation_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "conversation_id": row["conversation_id"],
+        "summary_text": row["summary_text"] or "",
+        "summary_token_count": row["summary_token_count"] or 0,
+        "compacted_until_message_id": row["compacted_until_message_id"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_compaction_state(
+    conversation_id: str,
+    summary_text: str,
+    summary_token_count: int,
+    compacted_until_message_id: int | None,
+) -> None:
+    """Create or update compaction summary state for a conversation."""
+    with with_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO conversation_compaction_state (
+                conversation_id,
+                summary_text,
+                summary_token_count,
+                compacted_until_message_id,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(conversation_id) DO UPDATE SET
+                summary_text = excluded.summary_text,
+                summary_token_count = excluded.summary_token_count,
+                compacted_until_message_id = excluded.compacted_until_message_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                conversation_id,
+                summary_text,
+                summary_token_count,
+                compacted_until_message_id,
+                _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def append_compaction_event(
+    conversation_id: str,
+    trigger_reason: str,
+    before_tokens: int | None = None,
+    after_tokens: int | None = None,
+) -> None:
+    """Append an audit event for compaction decision/execution."""
+    with with_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO conversation_compaction_events (
+                conversation_id,
+                trigger_reason,
+                before_tokens,
+                after_tokens,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                conversation_id,
+                trigger_reason,
+                before_tokens,
+                after_tokens,
+                _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
 def save_settings_snapshot(conversation_id: str, settings: Dict[str, Any]) -> None:
     """
     Save settings snapshot for an existing conversation.
